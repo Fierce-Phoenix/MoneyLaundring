@@ -1,11 +1,10 @@
 # MoneyLaundring
 
 ESP32 controller for a two-axis rack-and-pinion gantry ("moving dartboard").
-Each axis will eventually drive its motor until an IR sensor at that end
-detects the black-body endpoint, then reverse, with adjustable speed. This
-repo is currently at **Module 1: hardware bring-up** — there is no
-reversing/bounce logic yet. See [`docs/architecture.md`](docs/architecture.md)
-for the full build order.
+Each axis drives its motor until an IR sensor at that end detects the
+black-body endpoint, then reverses, with adjustable speed per axis. See
+[`docs/architecture.md`](docs/architecture.md) for the full build order and
+design decisions.
 
 ## Hardware
 
@@ -14,26 +13,29 @@ fed · 2× TT gear motors on perpendicular rack-and-pinion axes · 4× 3-pin IR
 obstacle modules (VCC/GND/OUT, LM393 trim-pot), 2 per axis. Full pin map and
 hookup instructions in [`docs/wiring.md`](docs/wiring.md).
 
-> **The pin map is an unconfirmed default**, not verified against the real
-> board. Use the `scan`, `mon`, and `pol` console commands below to check it
-> before arming.
+> **The pin map, sensor polarity, and FORWARD-direction mapping are all
+> unconfirmed defaults**, not verified against the real board. Use the
+> `scan`, `mon`, `pol`, and `xf`/`xr`/`yf`/`yr` console commands to check
+> them before ever typing `run`. See the calibration step in
+> [`docs/wiring.md`](docs/wiring.md).
 
-## Module 1: bring-up console
+## How it works
 
-This module has no bounce/reversing logic at all. What it has instead is a
-safe, non-blocking serial console so the operator can find and verify the
-four sensor GPIOs, the sensor polarity, and each motor's direction on the
-real board before any control logic exists. Motors never move until the
-operator explicitly types `arm`, and arming auto-expires after an idle
-timeout. Every commanded motor duty is clamped to `MAX_DUTY` (see
-`include/config.h`); there is no way to bypass that clamp.
+Two independent axes. The reversing decision lives in a pure, hardware-
+independent `Axis` class (unit-tested natively, no ESP32 required — see
+`test/test_axis/`): each axis drives toward one end, and once the sensor
+there goes active, reverses after a short pause, with a lockout so sensor
+chatter can't cause a second reversal too soon. `GantryController` is the
+only class that connects `Axis` to the real `Motor`/`LimitSensor` hardware.
+Design details in [`docs/architecture.md`](docs/architecture.md).
 
 ## Build (PlatformIO)
 
 ```
-pio run                 # compile for the ESP32
-pio run -t upload       # flash
-pio device monitor      # serial console @ 115200
+pio run -e esp32dev          # compile for the ESP32
+pio run -e esp32dev -t upload # flash
+pio device monitor            # serial console @ 115200
+pio test -e native             # run the native Axis unit tests (no board needed)
 ```
 
 ## Console commands (@ 115200, newline-terminated)
@@ -43,14 +45,24 @@ pio device monitor      # serial console @ 115200
 | `?`           | print the command list                                          |
 | `map`         | print the pin map and tunables                                  |
 | `mon`         | toggle the continuous sensor status line (on by default)        |
-| `pol`         | flip the active sensor level at runtime, print the new value    |
-| `scan`        | (disarmed only) watch candidate GPIOs for level changes          |
-| `arm`         | enable motor output; auto-disarms if idle too long               |
-| `disarm`      | disable motor output                                             |
-| `stop`        | stop both motors immediately and disarm                          |
-| `speed <n>`   | set jog duty 0-255, clamped to `MAX_DUTY`                        |
-| `xf` / `xr`   | jog axis X forward/reverse for `JOG_MS` (armed only)              |
-| `yf` / `yr`   | jog axis Y forward/reverse for `JOG_MS` (armed only)              |
+| `pol`         | flip the active sensor level at runtime (not while running)     |
+| `scan`        | (disarmed, not running) watch candidate GPIOs for level changes |
+| `arm`         | enable motor output; auto-disarms if idle too long (not while running) |
+| `disarm`      | disable motor output (also ends any run)                        |
+| `stop`        | stop both motors immediately and disarm (also ends any run)     |
+| `speed <n>`   | set jog duty 0-255, clamped to `MAX_DUTY` (not while running)   |
+| `xf` / `xr`   | jog axis X forward/reverse for `JOG_MS` (armed, not while running) |
+| `yf` / `yr`   | jog axis Y forward/reverse for `JOG_MS` (armed, not while running) |
+| `run`         | start autonomous bounce on both axes (armed, idle only)          |
+| `halt`        | stop autonomous bounce, stay armed                               |
+| `sx <0-255>`  | set axis X run speed, clamped to `MAX_DUTY` (allowed while running) |
+| `sy <0-255>`  | set axis Y run speed, clamped to `MAX_DUTY` (allowed while running) |
+| `st`          | print gantry status: state, heading, speed, reversals, fault, per axis |
+
+If either axis faults (unexpected endpoint pattern, no endpoint ever seen,
+or wiring that implies the motor is wired backwards), the controller stops
+both motors immediately, the console auto-disarms, and it prints which
+axis, which fault, and a likely cause.
 
 ## Status
 
@@ -58,14 +70,18 @@ Built in modules, each ending with a completion report in `reports/`
 (gitignored, not committed). See `docs/architecture.md` for what's built,
 what's planned, and why the design is split the way it is.
 
-- **Module 1 (this module) — bring-up.** Scaffolding, `config.h`, `Motor`,
-  `LimitSensor`, and `BringupConsole`. No bounce logic yet.
-- **Module 2 — planned.** `Axis` bounce logic (pure, hardware-independent,
-  native `pio test` coverage) and a per-direction maximum-travel-time
-  watchdog.
-- **Module 3 — planned.** Speed console refinements, final README, hardware
+- **Module 1 — bring-up.** `config.h`, `Motor`, `LimitSensor`,
+  `BringupConsole`. No bounce logic.
+- **Module 2 (current) — axis bounce logic, native tests, run mode.**
+  `Axis` (pure bounce decision logic, native-tested) and
+  `GantryController` (hardware glue), extended `BringupConsole` with
+  `run`/`halt`/`sx`/`sy`/`st`.
+- **Module 3 — planned.** Hardware calibration values once observed on the
+  real board, optional NVS persistence of run speeds, an
+  `AUTO_RUN_ON_BOOT` flag defaulting off, the final README, and a hardware
   test checklist.
 
 Nothing in this repo has been verified against real hardware — there was no
-access to the physical board while writing it. Treat the pin map and
-`SENSOR_ACTIVE_LEVEL` as unconfirmed until checked with `scan`/`mon`/`pol`.
+access to the physical board while writing it. Treat the pin map,
+`SENSOR_ACTIVE_LEVEL`, and `X_FORWARD_IS_TOWARD_MAX`/`Y_FORWARD_IS_TOWARD_MAX`
+as unconfirmed until checked with `scan`/`mon`/`pol`/`xf`/`yf`.

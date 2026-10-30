@@ -84,6 +84,7 @@ constexpr unsigned long JOG_MS = 400;              // duration of one xf/xr/yf/y
 constexpr unsigned long MONITOR_PERIOD_MS = 250;   // sensor status line period
 constexpr unsigned long ARM_TIMEOUT_MS = 60000;    // auto-disarm after this long idle
 constexpr unsigned long SCAN_WINDOW_MS = 15000;    // `scan` command observation window
+constexpr unsigned long SCAN_BASELINE_MS = 1000;   // `scan` command baseline-capture duration, before SCAN_WINDOW_MS begins
 
 // ---------------------------------------------------------------------------
 // Motor duty limit
@@ -103,3 +104,44 @@ constexpr uint8_t MAX_DUTY =
 // Default jog duty for the bring-up console's xf/xr/yf/yr commands. Always
 // clamped to MAX_DUTY (and is, by construction, below it).
 constexpr uint8_t DEFAULT_SPEED = 110;
+
+// ---------------------------------------------------------------------------
+// Axis direction mapping (Module 2) — PROVISIONAL
+// ---------------------------------------------------------------------------
+
+// Whether driving a motor FORWARD moves its axis toward the MAX-end sensor.
+// PROVISIONAL: which end FORWARD drives toward depends on motor wiring
+// polarity, which has not been observed on the real board. During bring-up,
+// use `xf`/`yf` together with `mon` to see which sensor activates, then set
+// these to match before ever using `run`. If an autonomous run faults with
+// OPPOSITE_LIMIT_HIT, that is the signal to flip the corresponding constant.
+constexpr bool X_FORWARD_IS_TOWARD_MAX = true;  // provisional
+constexpr bool Y_FORWARD_IS_TOWARD_MAX = true;  // provisional
+
+// ---------------------------------------------------------------------------
+// Axis bounce logic tunables (Module 2)
+// ---------------------------------------------------------------------------
+
+// Minimum time (ms) that must pass between reversals (rejects chatter if a
+// sensor flickers near the endpoint). Also the first half of the window,
+// starting at a reversal, during which Axis suppresses its BOTH_LIMITS_ACTIVE
+// and OPPOSITE_LIMIT_HIT fault checks (see docs/architecture.md and Axis.cpp).
+constexpr uint32_t REVERSE_LOCKOUT_MS = 400;
+
+// Time (ms) the motor is held stopped after a reversal before running in the
+// new heading, so the H-bridge and rack gear never see an instant direction
+// change. Also the second half of the fault-check-suppression window above.
+constexpr uint32_t REVERSE_PAUSE_MS = 150;
+
+// Maximum time (ms) one travel segment (from start() or from a reversal) may
+// run before Axis reports TRAVEL_TIMEOUT (no endpoint sensor was ever seen).
+// PROVISIONAL: a low run speed slows travel and could false-trip this if the
+// configured speed turns out to be much lower than assumed here; revisit
+// once real travel times are observed on the physical gantry.
+constexpr uint32_t MAX_TRAVEL_MS = 20000;
+
+// Default autonomous-run speed per axis (duty 0-255). Both start equal to
+// DEFAULT_SPEED; adjustable at runtime via the console's `sx`/`sy` commands,
+// always clamped to MAX_DUTY by GantryController.
+constexpr uint8_t RUN_SPEED_X = DEFAULT_SPEED;
+constexpr uint8_t RUN_SPEED_Y = DEFAULT_SPEED;

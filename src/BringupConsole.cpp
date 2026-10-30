@@ -15,8 +15,6 @@ constexpr uint8_t SCAN_CANDIDATE_PINS[] = {
 constexpr size_t SCAN_CANDIDATE_COUNT =
     sizeof(SCAN_CANDIDATE_PINS) / sizeof(SCAN_CANDIDATE_PINS[0]);
 
-constexpr unsigned long SCAN_BASELINE_MS = 1000;
-
 bool isMotorDriverPin(uint8_t pin) {
   return pin == X_ENA || pin == X_IN1 || pin == X_IN2 || pin == Y_ENB ||
          pin == Y_IN3 || pin == Y_IN4;
@@ -26,13 +24,14 @@ bool isMotorDriverPin(uint8_t pin) {
 
 void BringupConsole::begin(Motor &motorX, Motor &motorY, LimitSensor &xMin,
                             LimitSensor &xMax, LimitSensor &yMin,
-                            LimitSensor &yMax) {
+                            LimitSensor &yMax, GantryController &gantry) {
   _motorX = &motorX;
   _motorY = &motorY;
   _xMin = &xMin;
   _xMax = &xMax;
   _yMin = &yMin;
   _yMax = &yMax;
+  _gantry = &gantry;
 
   _activeLevel = SENSOR_ACTIVE_LEVEL;
   _jogDuty = DEFAULT_SPEED;
@@ -92,6 +91,21 @@ void BringupConsole::printPinMapAndTunables() {
   Serial.println(MAX_DUTY);
   Serial.print("    current jog speed (duty)=");
   Serial.println(_jogDuty);
+  Serial.println("  Axis bounce (Module 2):");
+  Serial.print("    X_FORWARD_IS_TOWARD_MAX=");
+  Serial.print(X_FORWARD_IS_TOWARD_MAX ? "true" : "false");
+  Serial.print("  Y_FORWARD_IS_TOWARD_MAX=");
+  Serial.println(Y_FORWARD_IS_TOWARD_MAX ? "true" : "false");
+  Serial.print("    REVERSE_LOCKOUT_MS=");
+  Serial.print(REVERSE_LOCKOUT_MS);
+  Serial.print("  REVERSE_PAUSE_MS=");
+  Serial.println(REVERSE_PAUSE_MS);
+  Serial.print("    MAX_TRAVEL_MS=");
+  Serial.println(MAX_TRAVEL_MS);
+  Serial.print("    RUN_SPEED_X=");
+  Serial.print(RUN_SPEED_X);
+  Serial.print("  RUN_SPEED_Y=");
+  Serial.println(RUN_SPEED_Y);
 }
 
 void BringupConsole::printBanner() {
@@ -116,16 +130,21 @@ void BringupConsole::cmdHelp() {
   Serial.println("  ?           show this help");
   Serial.println("  map         print pin map and tunables");
   Serial.println("  mon         toggle the continuous sensor status line (on by default)");
-  Serial.println("  pol         flip the active sensor level and print the new value");
-  Serial.println("  scan        scan candidate GPIOs for level changes (disarmed only)");
-  Serial.println("  arm         enable motor output (auto-disarms if idle too long)");
-  Serial.println("  disarm      disable motor output");
-  Serial.println("  stop        stop both motors immediately and disarm");
-  Serial.println("  speed <n>   set jog duty 0-255 (clamped to MAX_DUTY)");
-  Serial.println("  xf          jog X forward for JOG_MS (armed only)");
-  Serial.println("  xr          jog X reverse for JOG_MS (armed only)");
-  Serial.println("  yf          jog Y forward for JOG_MS (armed only)");
-  Serial.println("  yr          jog Y reverse for JOG_MS (armed only)");
+  Serial.println("  pol         flip the active sensor level and print the new value (not while running)");
+  Serial.println("  scan        scan candidate GPIOs for level changes (disarmed only, not while running)");
+  Serial.println("  arm         enable motor output (auto-disarms if idle too long, unless running)");
+  Serial.println("  disarm      disable motor output (also ends any run)");
+  Serial.println("  stop        stop both motors immediately and disarm (also ends any run)");
+  Serial.println("  speed <n>   set jog duty 0-255, clamped to MAX_DUTY (not while running)");
+  Serial.println("  xf          jog X forward for JOG_MS (armed only, not while running)");
+  Serial.println("  xr          jog X reverse for JOG_MS (armed only, not while running)");
+  Serial.println("  yf          jog Y forward for JOG_MS (armed only, not while running)");
+  Serial.println("  yr          jog Y reverse for JOG_MS (armed only, not while running)");
+  Serial.println("  run         start autonomous bounce on both axes (armed, idle only)");
+  Serial.println("  halt        stop autonomous bounce, stay armed");
+  Serial.println("  sx <0-255>  set axis X run speed, clamped to MAX_DUTY (allowed while running)");
+  Serial.println("  sy <0-255>  set axis Y run speed, clamped to MAX_DUTY (allowed while running)");
+  Serial.println("  st          print gantry status: state, heading, speed, reversals, fault, per axis");
 }
 
 void BringupConsole::cmdMap() {
@@ -147,6 +166,10 @@ void BringupConsole::cmdMon() {
 }
 
 void BringupConsole::cmdPol() {
+  if (_gantry->isRunning()) {
+    Serial.println("[pol] refused: gantry is running. `halt` first.");
+    return;
+  }
   _activeLevel = (_activeLevel == HIGH) ? LOW : HIGH;
   applyActiveLevelToSensors();
   Serial.print("[pol] active level is now ");
@@ -183,6 +206,10 @@ void BringupConsole::printSensorLine() {
 }
 
 void BringupConsole::cmdScanStart(unsigned long nowMs) {
+  if (_gantry->isRunning()) {
+    Serial.println("[scan] refused: gantry is running. `halt` first.");
+    return;
+  }
   if (_armed) {
     Serial.println("[scan] refused: disarm first (scan only runs while disarmed)");
     return;
@@ -229,6 +256,9 @@ void BringupConsole::cmdDisarm(const char *reason) {
   bool wasArmed = _armed;
   _armed = false;
   _jogAxis = JogAxis::NONE;
+  if (_gantry->isRunning()) {
+    _gantry->haltRun();
+  }
   _motorX->stop();
   _motorY->stop();
   if (wasArmed) {
@@ -238,6 +268,9 @@ void BringupConsole::cmdDisarm(const char *reason) {
 }
 
 void BringupConsole::cmdStop() {
+  if (_gantry->isRunning()) {
+    _gantry->haltRun();
+  }
   _motorX->stop();
   _motorY->stop();
   _jogAxis = JogAxis::NONE;
@@ -246,6 +279,10 @@ void BringupConsole::cmdStop() {
 }
 
 void BringupConsole::cmdSpeed(const String &arg) {
+  if (_gantry->isRunning()) {
+    Serial.println("[speed] refused: gantry is running. Use sx/sy, or `halt` first.");
+    return;
+  }
   if (arg.length() == 0) {
     Serial.print("[speed] current jog duty is ");
     Serial.println(_jogDuty);
@@ -285,6 +322,12 @@ Motor *BringupConsole::motorFor(JogAxis axis) {
 
 void BringupConsole::cmdJog(JogAxis axis, Direction dir, const char *label,
                              unsigned long nowMs) {
+  if (_gantry->isRunning()) {
+    Serial.print("[");
+    Serial.print(label);
+    Serial.println("] refused: gantry is running. `halt` first.");
+    return;
+  }
   if (!_armed) {
     Serial.print("[");
     Serial.print(label);
@@ -314,6 +357,62 @@ void BringupConsole::cmdJog(JogAxis axis, Direction dir, const char *label,
   _jogAxis = axis;
   _jogDir = dir;
   _jogStartMs = nowMs;
+}
+
+void BringupConsole::cmdRun(unsigned long nowMs) {
+  if (!_armed) {
+    Serial.println("[run] refused: not armed. Type `arm` first.");
+    return;
+  }
+  if (_scanPhase != ScanPhase::IDLE) {
+    Serial.println("[run] refused: a scan is in progress.");
+    return;
+  }
+  if (_jogAxis != JogAxis::NONE) {
+    Serial.println("[run] refused: a jog is in progress.");
+    return;
+  }
+  if (_gantry->isRunning()) {
+    Serial.println("[run] already running.");
+    return;
+  }
+  _gantry->startRun(nowMs);
+  Serial.println("[run] autonomous bounce started on both axes.");
+}
+
+void BringupConsole::cmdHalt() {
+  if (!_gantry->isRunning()) {
+    Serial.println("[halt] not running.");
+    return;
+  }
+  _gantry->haltRun();
+  Serial.println("[halt] autonomous bounce stopped. Still armed.");
+}
+
+void BringupConsole::cmdSetSpeedX(const String &arg) {
+  if (arg.length() == 0) {
+    Serial.println("[sx] usage: sx <0-255>");
+    return;
+  }
+  long requested = arg.toInt();
+  if (requested < 0) requested = 0;
+  if (requested > 255) requested = 255;
+  _gantry->setSpeedX((uint8_t)requested);
+}
+
+void BringupConsole::cmdSetSpeedY(const String &arg) {
+  if (arg.length() == 0) {
+    Serial.println("[sy] usage: sy <0-255>");
+    return;
+  }
+  long requested = arg.toInt();
+  if (requested < 0) requested = 0;
+  if (requested > 255) requested = 255;
+  _gantry->setSpeedY((uint8_t)requested);
+}
+
+void BringupConsole::cmdStatus() {
+  _gantry->printStatus();
 }
 
 void BringupConsole::handleLine(String line, unsigned long nowMs) {
@@ -362,6 +461,16 @@ void BringupConsole::handleLine(String line, unsigned long nowMs) {
     cmdJog(JogAxis::Y, Direction::FORWARD, "yf", nowMs);
   } else if (cmd == "yr") {
     cmdJog(JogAxis::Y, Direction::REVERSE, "yr", nowMs);
+  } else if (cmd == "run") {
+    cmdRun(nowMs);
+  } else if (cmd == "halt") {
+    cmdHalt();
+  } else if (cmd == "sx") {
+    cmdSetSpeedX(arg);
+  } else if (cmd == "sy") {
+    cmdSetSpeedY(arg);
+  } else if (cmd == "st") {
+    cmdStatus();
   } else {
     Serial.print("[?] unknown command: ");
     Serial.println(line);
@@ -370,6 +479,13 @@ void BringupConsole::handleLine(String line, unsigned long nowMs) {
 }
 
 void BringupConsole::updateArmTimeout(unsigned long nowMs) {
+  // The idle auto-disarm must not apply while the gantry is autonomously
+  // running: the safety stops in that mode are halt/stop/disarm/fault,
+  // not an idle timer (a `run` can legitimately go unattended for a long
+  // time without being a problem).
+  if (_gantry->isRunning()) {
+    return;
+  }
   if (_armed && (nowMs - _lastCommandMs >= ARM_TIMEOUT_MS)) {
     cmdDisarm("idle timeout reached, auto-disarmed");
   }
@@ -446,11 +562,24 @@ void BringupConsole::updateMonitor(unsigned long nowMs) {
   }
 }
 
+void BringupConsole::updateFaultPoll() {
+  if (_gantry->takeFaultFlag()) {
+    // GantryController has already stopped both motors and halted both
+    // axes by the time this flag is set; disarming here is this class's
+    // own safety contract (every motion path requires `arm`, and a fault
+    // must not leave the console in a state where another `run`/jog could
+    // be issued without the operator explicitly re-arming first).
+    cmdDisarm("gantry fault detected, auto-disarmed");
+  }
+}
+
 void BringupConsole::update(unsigned long nowMs) {
-  _xMin->update(nowMs);
-  _xMax->update(nowMs);
-  _yMin->update(nowMs);
-  _yMax->update(nowMs);
+  // Sensor updates and GantryController::update() happen once per loop in
+  // main.cpp, before this call, so no sensor is ever updated twice in one
+  // tick. This method only handles console I/O and its own state
+  // machines (jog/scan/monitor/arm-timeout), plus polling the gantry's
+  // fault latch.
+  updateFaultPoll();
 
   while (Serial.available() > 0) {
     char c = (char)Serial.read();

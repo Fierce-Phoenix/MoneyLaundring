@@ -119,3 +119,24 @@ clamp.
    intended way for the intended duration (`JOG_MS`). Run `stop` any time
    something looks wrong — it stops both motors immediately and disarms.
 6. If idle for `ARM_TIMEOUT_MS`, the console auto-disarms on its own.
+
+## Calibration step — direction mapping (do this before ever using `run`)
+
+Module 2 adds autonomous bouncing (`run`), which depends on knowing which
+end of each axis FORWARD actually drives toward. That mapping lives in
+`X_FORWARD_IS_TOWARD_MAX` / `Y_FORWARD_IS_TOWARD_MAX` in `config.h`, and
+both are **provisional** (`true`) until confirmed:
+
+1. With `mon` running (default on) and the gantry `arm`ed, type `xf` and
+   watch which sensor's `*` marker lights up as the carriage approaches
+   it. If `X_MAX` activates, `X_FORWARD_IS_TOWARD_MAX = true` is correct;
+   if `X_MIN` activates instead, it needs to be `false`. Repeat with `yf`
+   for `Y_FORWARD_IS_TOWARD_MAX`.
+2. Edit `include/config.h` to match what you observed, then reflash.
+3. Do not type `run` until this step is done and the pin map and sensor
+   polarity (`scan`/`mon`/`pol`, above) are also confirmed on the real
+   board. If the mapping is wrong, an autonomous run will fault with
+   `OPPOSITE_LIMIT_HIT` on the affected axis — the gantry stops itself and
+   the console disarms, but it is still safer to calibrate first than to
+   rely on that fault catching it every time.
+

@@ -16,25 +16,31 @@
 
 #include <Arduino.h>
 
+#include "GantryController.h"
 #include "LimitSensor.h"
 #include "Motor.h"
 
 class BringupConsole {
  public:
-  // Wire up the motor and sensor objects this console will drive and
-  // report on. Does not touch any hardware itself (Motor/LimitSensor
-  // begin() must already have been called).
+  // Wire up the motor, sensor, and gantry-controller objects this console
+  // will drive and report on. Does not touch any hardware itself
+  // (Motor/LimitSensor begin() and GantryController::begin() must already
+  // have been called).
   void begin(Motor &motorX, Motor &motorY, LimitSensor &xMin,
-             LimitSensor &xMax, LimitSensor &yMin, LimitSensor &yMax);
+             LimitSensor &xMax, LimitSensor &yMin, LimitSensor &yMax,
+             GantryController &gantry);
 
   // Print the startup banner: pin map, tunables, and the "unconfirmed,
   // check before arming" warning. Call once from setup(), after begin().
   void printBanner();
 
-  // Call every loop() iteration with the current millis(). Non-blocking:
+  // Call every loop() iteration with the current millis(), after the four
+  // LimitSensor::update() calls and the GantryController::update() call
+  // have already happened for this tick (see main.cpp). Non-blocking:
   // reads any available serial input, advances the jog/scan state
-  // machines, checks the arm timeout, and prints the periodic sensor
-  // monitor line. Never calls delay().
+  // machines, checks the arm timeout (suspended while running), polls the
+  // gantry's fault flag (disarming if set), and prints the periodic
+  // sensor monitor line. Never calls delay().
   void update(unsigned long nowMs);
 
  private:
@@ -47,6 +53,7 @@ class BringupConsole {
   LimitSensor *_xMax = nullptr;
   LimitSensor *_yMin = nullptr;
   LimitSensor *_yMax = nullptr;
+  GantryController *_gantry = nullptr;
 
   bool _armed = false;
   unsigned long _lastCommandMs = 0;
@@ -82,11 +89,17 @@ class BringupConsole {
   void cmdStop();
   void cmdSpeed(const String &arg);
   void cmdJog(JogAxis axis, Direction dir, const char *label, unsigned long nowMs);
+  void cmdRun(unsigned long nowMs);
+  void cmdHalt();
+  void cmdSetSpeedX(const String &arg);
+  void cmdSetSpeedY(const String &arg);
+  void cmdStatus();
 
   void updateArmTimeout(unsigned long nowMs);
   void updateJog(unsigned long nowMs);
   void updateScan(unsigned long nowMs);
   void updateMonitor(unsigned long nowMs);
+  void updateFaultPoll();
 
   void printPinMapAndTunables();
   void printSensorLine();
