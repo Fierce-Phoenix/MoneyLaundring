@@ -1,5 +1,7 @@
 #include "Motor.h"
 
+#include "config.h"
+
 void Motor::begin(uint8_t enaPin, uint8_t in1Pin, uint8_t in2Pin,
                    uint8_t pwmChannel, uint32_t freqHz, uint8_t resBits) {
   _enaPin = enaPin;
@@ -20,6 +22,17 @@ void Motor::begin(uint8_t enaPin, uint8_t in1Pin, uint8_t in2Pin,
 }
 
 void Motor::drive(Direction dir, uint8_t duty) {
+  uint8_t clamped = duty;
+  if (clamped > MAX_DUTY) {
+    clamped = MAX_DUTY;
+    Serial.print("[motor] requested duty ");
+    Serial.print(duty);
+    Serial.print(" exceeds MAX_DUTY ");
+    Serial.print(MAX_DUTY);
+    Serial.print("; clamped to ");
+    Serial.println(clamped);
+  }
+
   if (dir == Direction::FORWARD) {
     digitalWrite(_in1Pin, HIGH);
     digitalWrite(_in2Pin, LOW);
@@ -27,7 +40,7 @@ void Motor::drive(Direction dir, uint8_t duty) {
     digitalWrite(_in1Pin, LOW);
     digitalWrite(_in2Pin, HIGH);
   }
-  ledcWrite(_pwmChannel, duty);
+  ledcWrite(_pwmChannel, clamped);
 }
 
 void Motor::stop() {

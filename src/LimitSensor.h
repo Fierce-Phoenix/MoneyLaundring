@@ -11,14 +11,24 @@ class LimitSensor {
   // (endpoint detected).
   void begin(uint8_t pin, int activeLevel);
 
-  // Debounced reading: true only when the pin has read `activeLevel`
-  // continuously for at least DEBOUNCE_MS. Call this every loop(); it
-  // samples digitalRead(pin) internally and tracks how long the current
-  // raw level has been stable.
-  bool active();
+  // Non-blocking debounce step. Call this every loop() iteration with the
+  // current millis(). Samples digitalRead(pin) and, once the raw level has
+  // been stable for DEBOUNCE_MS, updates the debounced state that active()
+  // reports.
+  void update(unsigned long nowMs);
 
   // Instantaneous digitalRead(pin), with no debounce — for diagnostics.
   int raw() const;
+
+  // Debounced reading: true only when the last-settled level equals the
+  // current active level. Reflects the state as of the most recent
+  // update() call.
+  bool active() const;
+
+  // Change which digital level counts as "active" at runtime (used by the
+  // console's `pol` command). Does not itself re-sample the pin; the next
+  // update() call will re-evaluate against the new level.
+  void setActiveLevel(int activeLevel);
 
  private:
   uint8_t _pin = 0;

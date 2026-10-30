@@ -13,20 +13,29 @@ void LimitSensor::begin(uint8_t pin, int activeLevel) {
   _debounced = (level == _activeLevel);
 }
 
-bool LimitSensor::active() {
+void LimitSensor::update(unsigned long nowMs) {
   int level = digitalRead(_pin);
-  unsigned long now = millis();
 
   if (level != _lastRaw) {
     _lastRaw = level;
-    _lastChangeMs = now;
-  } else if (now - _lastChangeMs >= DEBOUNCE_MS) {
+    _lastChangeMs = nowMs;
+  } else if (nowMs - _lastChangeMs >= DEBOUNCE_MS) {
     _debounced = (level == _activeLevel);
   }
-
-  return _debounced;
 }
 
 int LimitSensor::raw() const {
   return digitalRead(_pin);
+}
+
+bool LimitSensor::active() const {
+  return _debounced;
+}
+
+void LimitSensor::setActiveLevel(int activeLevel) {
+  _activeLevel = activeLevel;
+  // Re-evaluate immediately against the last-settled raw level so a
+  // runtime polarity flip (the `pol` console command) is reflected by
+  // active() right away, rather than waiting for the next debounce window.
+  _debounced = (_lastRaw == _activeLevel);
 }

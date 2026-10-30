@@ -1,71 +1,121 @@
 # Wiring & Pin Map — MoneyLaundring
 
-This file is the **hardware contract**. The firmware's `include/config.h` is
-generated from the pin map below. If the board is rewired, update this file
-first, then `config.h`.
+This file is the **hardware contract**. The firmware's `include/config.h`
+mirrors the pin map and tunables below. If the board is rewired, update
+this file first, then `config.h`.
 
-## Components (confirmed from build photos)
+## Parts (as seen in the build photos)
 
-| Role            | Part                                             |
-|-----------------|--------------------------------------------------|
-| Controller      | ESP32 DevKit, 30-pin WROOM-32, micro-USB         |
-| Motor driver    | L298N dual H-bridge (red board, heatsink)        |
-| Motors          | 2× TT gear motors, on a rack-and-pinion 2-axis gantry |
-| Endpoint sensors| 4× IR obstacle modules (VCC/GND/OUT + trim-pot)  |
-| Power           | 12V barrel jack → L298N 12V input                |
+| Role            | Part                                                        |
+|-----------------|--------------------------------------------------------------|
+| Controller      | 38-pin ESP32 DevKit, micro-USB, BOOT/RST buttons, G-prefixed silkscreen |
+| Motor driver    | L298N dual H-bridge (red board), fed from a 12V barrel-jack adapter |
+| Motors          | 2× yellow TT gear motors, each on its own 3D-printed rack-and-pinion axis (axes perpendicular) |
+| Endpoint sensors| 4× 3-pin IR obstacle modules (VCC/GND/OUT, LM393 trim-pot), 2 per axis |
 
-The gantry is two independent linear axes. Each axis is driven by one motor
-and bounded by two IR sensors (one at each end of travel). "Axis X" = one
-motor + its 2 limits; "Axis Y" = the other motor + its 2 limits.
+The gantry is two independent linear axes driven by rack-and-pinion. Each
+axis has one motor and two endpoint sensors (one at each end of travel).
+"Axis X" = one motor + its 2 limits; "Axis Y" = the other motor + its 2
+limits.
 
-## ⚠️ Pin map status: RECOMMENDED DEFAULTS — must be confirmed
+## ⚠️ Pin map status: UNCONFIRMED DEFAULTS
 
-The exact ESP32 GPIO for each wire could **not** be traced from the breadboard
-photos. The table below is a *safe recommended* mapping (avoids input-only and
-boot-strapping-pin traps). Before flashing, either:
- - **(A)** rewire the board to match this table, or
- - **(B)** replace these numbers with the GPIOs actually used on the board.
+The exact ESP32 GPIO each wire lands on could **not** be read from the
+build photos. The table below lives only as named constants in
+`include/config.h` and is a *starting point*, not a verified fact. Before
+arming the bring-up console on the real board:
 
-Motor outputs must be on normal output-capable pins. Sensor inputs are placed
-on GPIO 34/35/36/39, which are **input-only** (correct for sensors) and have
-**no internal pull-up** — fine, because the IR modules drive their OUT pin
-actively.
+- Use the `scan` console command to watch for GPIO level changes while
+  touching one sensor at a time, and confirm each sensor's actual pin.
+- Use `mon` to watch all four sensors' raw/active state continuously.
+- Use `pol` to flip the active level at runtime if `mon` shows the wrong
+  polarity, and copy the printed value into `SENSOR_ACTIVE_LEVEL` in
+  `config.h` once confirmed.
+- Only type `arm` once you've checked motor direction and sensor wiring
+  against this table (or corrected the table to match the real board).
+
+Motor driver outputs are on normal output-capable GPIOs. Sensor inputs are
+on GPIO 34/35/36/39, which are **input-only** (fine for inputs) and have
+**no internal pull-up** — that's fine here because the IR modules drive
+their OUT pin actively, not through a pull-up.
 
 ### Motor driver (L298N)
 
 | Signal | ESP32 GPIO | L298N pin | Notes                        |
 |--------|-----------|-----------|------------------------------|
 | X ENA  | 25        | ENA       | PWM speed, axis X            |
-| X IN1  | 26        | IN1       | direction A                  |
-| X IN2  | 27        | IN2       | direction A                  |
+| X IN1  | 26        | IN1       | direction, axis X            |
+| X IN2  | 27        | IN2       | direction, axis X            |
 | Y ENB  | 33        | ENB       | PWM speed, axis Y            |
-| Y IN3  | 32        | IN3       | direction B                  |
-| Y IN4  | 13        | IN4       | direction B                  |
+| Y IN3  | 32        | IN3       | direction, axis Y            |
+| Y IN4  | 13        | IN4       | direction, axis Y            |
 
-> If ENA/ENB still have their jumper caps on, remove them — speed control
-> needs ENA/ENB wired to the two GPIOs above, not tied to 5V.
+> **Remove the ENA/ENB jumper caps** if they're still on the L298N board.
+> Speed control needs ENA/ENB wired to the GPIOs above, not tied to 5V —
+> otherwise the motors always run at full speed regardless of PWM duty.
 
 ### IR endpoint sensors (digital OUT)
 
 | Signal       | ESP32 GPIO | Meaning                      |
 |--------------|-----------|-------------------------------|
-| X_MIN sensor | 34        | axis X, "reverse" end         |
-| X_MAX sensor | 35        | axis X, "forward" end         |
-| Y_MIN sensor | 36        | axis Y, "reverse" end         |
-| Y_MAX sensor | 39        | axis Y, "forward" end         |
+| X_MIN sensor | 34        | axis X, one end                |
+| X_MAX sensor | 35        | axis X, other end              |
+| Y_MIN sensor | 36        | axis Y, one end                |
+| Y_MAX sensor | 39        | axis Y, other end              |
 
-### Power & ground
+## Power & ground
 
-- 12V barrel jack → L298N `12V` and `GND`.
-- L298N `5V` out → ESP32 `5V`/`VIN` **only if** the L298N 5V-enable jumper is
-  on; otherwise power the ESP32 from USB during bring-up. Do not back-feed two
-  supplies at once.
-- **Common ground is mandatory:** L298N `GND` ↔ ESP32 `GND`.
-- IR modules `VCC` → 5V rail, `GND` → common ground, `OUT` → GPIO above.
+- 12V barrel jack → L298N `12V IN` and `GND`.
+- **During bring-up, power the ESP32 from USB (micro-USB), not from the
+  L298N's 5V output.** Do not back-feed the ESP32 from the L298N 5V rail
+  while USB is also connected — pick one supply path at a time.
+- **Common ground is mandatory:** L298N `GND` ↔ ESP32 `GND`. Without this,
+  sensor and direction-pin readings will be unreliable or wrong.
+- **IR modules must be powered from the ESP32 3V3 pin, not 5V.** These
+  modules' OUT pin tracks their VCC rail; running them from 5V would put up
+  to 5V on an ESP32 GPIO, which is outside the 3.3V-tolerant input range.
+  Powering from 3V3 keeps OUT at or below 3.3V always. (An earlier draft of
+  this file incorrectly said to use 5V — that was wrong and is corrected
+  here.)
 
-## Sensor polarity — to be determined at bring-up
+## Why MAX_DUTY exists
 
-IR obstacle modules vary: some pull OUT **LOW** on detection, some **HIGH**.
-Which level means "black-body endpoint reached" is set by `SENSOR_ACTIVE_LEVEL`
-in `config.h`. The Module 1 diagnostic prints every sensor's raw reading so the
-correct level can be read off the real hardware instead of guessed.
+The L298N is fed from the 12V barrel-jack supply, but the TT motors are
+rated for roughly 3-6V. Running them at full PWM duty against a 12V rail
+would overdrive and likely damage them (or at minimum run them far outside
+their rated speed/torque curve). `config.h` computes
+
+```
+MAX_DUTY = (uint8_t)(255.0 * MOTOR_RATED_VOLTS / (SUPPLY_VOLTS - 2.0) + 0.5)
+```
+
+with `SUPPLY_VOLTS = 12.0` and `MOTOR_RATED_VOLTS = 6.0`, which evaluates to
+**153**. The `(SUPPLY_VOLTS - 2.0)` term accounts for the L298N's internal
+transistor voltage drop (roughly 2V) regardless of PWM duty. Every duty
+value the firmware ever writes to a motor's PWM channel is clamped to
+`MAX_DUTY` inside `Motor::drive()`, with a printed notice if a higher value
+was requested. There is no console command or code path that bypasses this
+clamp.
+
+## Bring-up procedure
+
+1. Power the ESP32 from USB only (L298N 12V can be connected or not; just
+   don't also back-feed 5V into the ESP32). Open the serial monitor at
+   115200 baud.
+2. Read the boot banner. It reprints the full pin map and tunables and
+   warns that the pin map is unconfirmed.
+3. Run `scan`: cover/uncover each IR sensor one at a time and watch which
+   GPIO number the console reports as changing. Confirm it matches the
+   `X_MIN`/`X_MAX`/`Y_MIN`/`Y_MAX` pins above (or note the real pin if it
+   differs, and update this table and `config.h`).
+4. Run `mon` (it is already on by default) and check that covering each
+   sensor with a black-body marker makes its raw level flip, and that its
+   `active()` interpretation shows `*` for the reading you expect to mean
+   "endpoint reached". If the polarity is backwards, run `pol` to flip it
+   at runtime, then copy the printed value into `SENSOR_ACTIVE_LEVEL` in
+   `config.h` so it survives a reboot.
+5. Only once pins and polarity look right: run `arm`, then `xf` (or `xr`,
+   `yf`, `yr`) one at a time and visually confirm that axis moves the
+   intended way for the intended duration (`JOG_MS`). Run `stop` any time
+   something looks wrong — it stops both motors immediately and disarms.
+6. If idle for `ARM_TIMEOUT_MS`, the console auto-disarms on its own.
