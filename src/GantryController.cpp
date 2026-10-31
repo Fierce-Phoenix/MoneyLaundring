@@ -155,6 +155,11 @@ bool GantryController::takeFaultFlag() {
   return v;
 }
 
+void GantryController::invalidateCommandCache() {
+  _cmdX = MotorCommandState{};
+  _cmdY = MotorCommandState{};
+}
+
 void GantryController::printFaultLine(const char *axisName, AxisFault fault) {
   Serial.print("[fault] axis ");
   Serial.print(axisName);

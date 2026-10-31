@@ -355,6 +355,15 @@ void BringupConsole::cmdJog(JogAxis axis, Direction dir, const char *label,
   Serial.print(" ms @ duty ");
   Serial.println(_jogDuty);
 
+  // Module 3 cache audit: this drive() call reaches the motor directly,
+  // bypassing GantryController entirely, so its per-motor command cache
+  // has no idea this happened. Invalidate it now so that if a `run`
+  // later commands this exact same direction/duty as its first command,
+  // GantryController does not mistake it for "unchanged" and skip
+  // calling Motor::drive() — the motor must not be left idle while the
+  // controller believes it commanded it to run.
+  _gantry->invalidateCommandCache();
+
   m->drive(dir, _jogDuty);
   _jogAxis = axis;
   _jogDir = dir;
@@ -502,6 +511,9 @@ void BringupConsole::updateJog(unsigned long nowMs) {
     if (m != nullptr) {
       m->stop();
     }
+    // See cmdJog()'s matching comment: this stop() also bypasses
+    // GantryController, so invalidate its cache here too.
+    _gantry->invalidateCommandCache();
     Serial.println("[jog] done, stopped");
     _jogAxis = JogAxis::NONE;
   }

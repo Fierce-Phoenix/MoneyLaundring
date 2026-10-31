@@ -127,7 +127,25 @@ kind of thing that can start right at a reversal).
 Public interface: `begin(...)`, `startRun(nowMs)`, `haltRun()`,
 `isRunning()`, `setSpeedX`/`setSpeedY` (both clamped to `MAX_DUTY`),
 `printStatus()`, `takeFaultFlag()` (latched, polled and cleared by the
-console), `update(nowMs)`.
+console), `invalidateCommandCache()` (Module 3 — see below), and
+`update(nowMs)`.
+
+**Per-motor command cache (Module 3 audit)** — `GantryController` only
+calls `Motor::drive()`/`stop()` when the commanded run state, direction,
+or duty actually changed since the last tick, tracked per-motor in a
+small cache. That cache is invalidated in `startRun()`, in `haltRun()`,
+and in the fault-shutdown branch of `update()` — all already true as of
+Module 2. The Module 3 audit found one gap: `BringupConsole`'s jog
+commands (`xf`/`xr`/`yf`/`yr`) call `Motor::drive()`/`stop()` directly,
+bypassing `GantryController` entirely, so a jog could leave the cache
+holding a stale "last commanded" value the controller never actually
+issued. If a later `run`'s first command happened to match that stale
+value, the cache would wrongly treat it as unchanged and skip the
+`Motor::drive()` call — leaving the motor idle while the controller
+believed it was running. Fixed by calling the new
+`GantryController::invalidateCommandCache()` both when a jog starts
+(`cmdJog()`) and when it ends (`updateJog()`), so the first command of
+every `run` is now always sent to the hardware.
 
 **`BringupConsole`** (hardware) — the Module 1 deliverable, extended in
 Module 2. Non-blocking serial command parser at `SERIAL_BAUD`. Bring-up

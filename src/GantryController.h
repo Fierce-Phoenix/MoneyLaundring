@@ -55,6 +55,18 @@ class GantryController {
   // loop and must disarm when it reads true.
   bool takeFaultFlag();
 
+  // Invalidate the per-motor command cache (Module 3), so the next
+  // update() call is guaranteed to issue a fresh Motor::drive()/stop()
+  // call regardless of what was last commanded, even if the new command
+  // happens to be identical. startRun(), haltRun(), and the fault
+  // shutdown path already invalidate the cache themselves; this method
+  // exists for the one remaining case: anything outside this class's
+  // knowledge driving the motors directly, which today is only
+  // BringupConsole's xf/xr/yf/yr jog commands. The console calls this
+  // both when a jog starts and when it ends, so a stale cache entry can
+  // never cause the first command of the next run to be silently skipped.
+  void invalidateCommandCache();
+
   // Call once per loop() iteration, after both LimitSensor::update() have
   // already been called for this tick. No-op if not running (beyond
   // ensuring motors stay stopped, which haltRun()/fault handling already
