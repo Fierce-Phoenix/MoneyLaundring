@@ -36,16 +36,26 @@ enum class AxisFault {
   TRAVEL_TIMEOUT,       // no endpoint sensor seen within maxTravelMs
   BOTH_LIMITS_ACTIVE,   // both limit sensors read active simultaneously
   OPPOSITE_LIMIT_HIT,   // the limit behind the current heading went active
+  STUCK_AT_LIMIT,       // the behind limit stayed active for clearMs while
+                        // the axis was otherwise allowed to run (the
+                        // carriage never left the end it started/reversed
+                        // at — classically, inverted motor wiring with the
+                        // carriage already resting at that end, so
+                        // OPPOSITE_LIMIT_HIT's rising-edge check can never
+                        // fire)
 };
 
 // Tunables, supplied by the caller via begin(). Axis has no compiled-in
 // defaults of its own; config.h's REVERSE_LOCKOUT_MS / REVERSE_PAUSE_MS /
-// MAX_TRAVEL_MS feed this struct on the hardware side (see
+// MAX_TRAVEL_MS / MAX_CLEAR_MS feed this struct on the hardware side (see
 // GantryController::begin()).
 struct AxisConfig {
   uint32_t lockoutMs;        // minimum time between reversals
   uint32_t reversePauseMs;   // time held stopped after a reversal
   uint32_t maxTravelMs;      // max time one travel segment may run
+  uint32_t clearMs;          // max time the behind limit may stay active
+                             // while the axis is allowed to run, before
+                             // STUCK_AT_LIMIT faults
 };
 
 // Result of one update() call: what the caller should do this tick, plus
@@ -90,7 +100,7 @@ class Axis {
   uint32_t getReversalCount() const { return _reversalCount; }
 
  private:
-  AxisConfig _config{0, 0, 0};
+  AxisConfig _config{0, 0, 0, 0};
 
   AxisState _state = AxisState::IDLE;
   AxisDir _dir = AxisDir::TOWARD_MAX;
@@ -107,4 +117,14 @@ class Axis {
   bool _hasPrevReading = false;
   bool _prevMinActive = false;
   bool _prevMaxActive = false;
+
+  // Stuck-at-limit clock (Module 3): accumulated ms during which the
+  // behind limit has been continuously active while the axis was allowed
+  // to run (not in the post-reversal pause). Reset to 0 whenever the
+  // behind limit is inactive, or at every reversal. Frozen (neither
+  // advancing nor resetting) while the behind limit is active but the
+  // axis is in the post-reversal pause. See Axis.cpp for the exact
+  // accumulation logic.
+  uint32_t _stuckClockMs = 0;
+  uint32_t _stuckLastTickMs = 0;
 };

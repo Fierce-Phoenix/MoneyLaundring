@@ -14,6 +14,8 @@ const char *faultName(AxisFault fault) {
       return "BOTH_LIMITS_ACTIVE";
     case AxisFault::OPPOSITE_LIMIT_HIT:
       return "OPPOSITE_LIMIT_HIT";
+    case AxisFault::STUCK_AT_LIMIT:
+      return "STUCK_AT_LIMIT";
   }
   return "UNKNOWN";
 }
@@ -28,6 +30,10 @@ const char *likelyCause(AxisFault fault) {
     case AxisFault::TRAVEL_TIMEOUT:
       return "likely cause: no endpoint was seen - check that axis's sensor "
              "wiring, or its run speed";
+    case AxisFault::STUCK_AT_LIMIT:
+      return "likely cause: the axis is not leaving the end it started at - "
+             "if it started at that end, flip that axis's FORWARD mapping "
+             "constant; otherwise check for a jam or too low a speed";
     default:
       return "";
   }
@@ -61,7 +67,7 @@ void GantryController::begin(Motor &motorX, Motor &motorY, LimitSensor &xMin,
   _yMin = &yMin;
   _yMax = &yMax;
 
-  AxisConfig cfg{REVERSE_LOCKOUT_MS, REVERSE_PAUSE_MS, MAX_TRAVEL_MS};
+  AxisConfig cfg{REVERSE_LOCKOUT_MS, REVERSE_PAUSE_MS, MAX_TRAVEL_MS, MAX_CLEAR_MS};
   _axisX.begin(cfg);
   _axisY.begin(cfg);
 

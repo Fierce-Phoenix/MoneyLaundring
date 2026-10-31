@@ -140,6 +140,15 @@ constexpr uint32_t REVERSE_PAUSE_MS = 150;
 // once real travel times are observed on the physical gantry.
 constexpr uint32_t MAX_TRAVEL_MS = 20000;
 
+// Maximum time (ms) the limit sensor behind the current heading may stay
+// continuously active while the axis is otherwise allowed to run before
+// Axis reports STUCK_AT_LIMIT (Module 3). PROVISIONAL: this is meant to be
+// much shorter than MAX_TRAVEL_MS, since it should only ever need to cover
+// the brief moment right at a reversal, not real travel time — if a
+// legitimate reversal pattern ever takes this long to clear the behind
+// sensor on the real hardware, this value should be revisited.
+constexpr uint32_t MAX_CLEAR_MS = 3000;
+
 // Default autonomous-run speed per axis (duty 0-255). Both start equal to
 // DEFAULT_SPEED; adjustable at runtime via the console's `sx`/`sy` commands,
 // always clamped to MAX_DUTY by GantryController.

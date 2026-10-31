@@ -102,6 +102,8 @@ void BringupConsole::printPinMapAndTunables() {
   Serial.println(REVERSE_PAUSE_MS);
   Serial.print("    MAX_TRAVEL_MS=");
   Serial.println(MAX_TRAVEL_MS);
+  Serial.print("    MAX_CLEAR_MS=");
+  Serial.println(MAX_CLEAR_MS);
   Serial.print("    RUN_SPEED_X=");
   Serial.print(RUN_SPEED_X);
   Serial.print("  RUN_SPEED_Y=");

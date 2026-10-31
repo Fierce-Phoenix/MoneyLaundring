@@ -60,9 +60,10 @@ pio test -e native             # run the native Axis unit tests (no board needed
 | `st`          | print gantry status: state, heading, speed, reversals, fault, per axis |
 
 If either axis faults (unexpected endpoint pattern, no endpoint ever seen,
-or wiring that implies the motor is wired backwards), the controller stops
-both motors immediately, the console auto-disarms, and it prints which
-axis, which fault, and a likely cause.
+the carriage never leaving the end it started at, or wiring that implies
+the motor is wired backwards), the controller stops both motors
+immediately, the console auto-disarms, and it prints which axis, which
+fault, and a likely cause.
 
 ## Status
 
@@ -72,11 +73,20 @@ what's planned, and why the design is split the way it is.
 
 - **Module 1 — bring-up.** `config.h`, `Motor`, `LimitSensor`,
   `BringupConsole`. No bounce logic.
-- **Module 2 (current) — axis bounce logic, native tests, run mode.**
-  `Axis` (pure bounce decision logic, native-tested) and
-  `GantryController` (hardware glue), extended `BringupConsole` with
-  `run`/`halt`/`sx`/`sy`/`st`.
-- **Module 3 — planned.** Hardware calibration values once observed on the
+- **Module 2 — axis bounce logic, native tests, run mode.** `Axis` (pure
+  bounce decision logic, native-tested) and `GantryController` (hardware
+  glue), extended `BringupConsole` with `run`/`halt`/`sx`/`sy`/`st`.
+- **Module 3 (current) — verification and hardening.** Confirmed the
+  native test suite actually runs and every `Axis` rule is proven by a
+  test that can fail (boundary tests, a stuck-at-limit test, inverted-
+  mapping simulated-carriage runs, a deterministic fuzz test, and a
+  four-mutation sanity check). Closed a safety gap by adding the
+  `STUCK_AT_LIMIT` fault (catches a carriage resting at an end with
+  inverted motor wiring, which `OPPOSITE_LIMIT_HIT` cannot). Removed a
+  hardware-glue risk by auditing and fixing `GantryController`'s
+  per-motor command cache so a jog can never leave a stale cache entry
+  behind for the next `run`.
+- **Module 4 — planned.** Hardware calibration values once observed on the
   real board, optional NVS persistence of run speeds, an
   `AUTO_RUN_ON_BOOT` flag defaulting off, the final README, and a hardware
   test checklist.

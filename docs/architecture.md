@@ -94,11 +94,34 @@ doesn't know about `Motor`, and `GantryController` doesn't know about
 decision engine. See `src/Axis.h`/`Axis.cpp` for the exact rule order:
 not-RUNNING short-circuit, BOTH_LIMITS_ACTIVE / OPPOSITE_LIMIT_HIT checks
 (suppressed for `lockoutMs + reversePauseMs` after a reversal, never
-suppressed right after `start()`), TRAVEL_TIMEOUT, the reversal trigger
+suppressed right after `start()`), then **STUCK_AT_LIMIT** (Module 3,
+never suppressed — see below), then TRAVEL_TIMEOUT, the reversal trigger
 (gated by `lockoutMs` since the last reversal), then the post-reversal
 pause. All time arithmetic uses unsigned subtraction so it survives
-`millis()` rollover. Covered by native Unity tests in
-`test/test_axis/test_axis.cpp`, including a simulated-carriage test.
+`millis()` rollover. Every rule is proven by a native Unity test that has
+actually been run and that a four-mutation sanity check (Module 3)
+confirmed can fail — see `test/test_axis/test_axis.cpp` and
+`reports/module-3-report.md`.
+
+**STUCK_AT_LIMIT (Module 3)** closes a gap `OPPOSITE_LIMIT_HIT` cannot
+cover: if the carriage is already resting at an end when `start()` is
+called, and that axis's motor wiring is inverted relative to its FORWARD
+mapping constant, the "drive away from this end" command actually keeps
+driving into it. The limit behind the heading was already active before
+any update could observe a rising edge, so it never rises and
+`OPPOSITE_LIMIT_HIT` can never fire — without a second check, the axis
+would just keep "running" into its end stop until the much longer
+`maxTravelMs` eventually caught it. `AxisConfig.clearMs` bounds how long
+the behind limit may stay continuously active while the axis is otherwise
+allowed to run (not held in the post-reversal pause): a clock accumulates
+elapsed time while that condition holds, resets to zero the instant the
+behind limit goes inactive, and also resets at every reversal. Once the
+clock reaches `clearMs`, the axis faults `STUCK_AT_LIMIT`. This check runs
+immediately after the `OPPOSITE_LIMIT_HIT` check and before
+`TRAVEL_TIMEOUT`, and — unlike `BOTH_LIMITS_ACTIVE`/`OPPOSITE_LIMIT_HIT`
+— is never subject to the post-reversal suppression window, since
+suppressing it would defeat the point (the stuck condition is exactly the
+kind of thing that can start right at a reversal).
 
 **`GantryController`** (hardware glue) — see the design decision above.
 Public interface: `begin(...)`, `startRun(nowMs)`, `haltRun()`,
@@ -128,7 +151,7 @@ pins, the four sensor pins, `PWM_FREQ`/`PWM_RES`/PWM channels,
 `MAX_DUTY`, `DEFAULT_SPEED`, and (Module 2) `X_FORWARD_IS_TOWARD_MAX` /
 `Y_FORWARD_IS_TOWARD_MAX` (provisional), `REVERSE_LOCKOUT_MS`,
 `REVERSE_PAUSE_MS`, `MAX_TRAVEL_MS` (provisional), `RUN_SPEED_X`,
-`RUN_SPEED_Y`.
+`RUN_SPEED_Y`, and (Module 3) `MAX_CLEAR_MS` (provisional).
 
 ## Repo layout
 
@@ -166,12 +189,25 @@ controller always acts on this tick's debounced reading, not a stale one.
   `Motor`, `LimitSensor`, and `BringupConsole`. Let the operator confirm
   the pin map, motor direction, and sensor polarity on the real board. No
   bounce logic, no `Axis` class, no native tests.
-- **Module 2 (this module) — axis bounce logic, native tests, run mode.**
-  Added `Axis` (pure bounce decision logic, natively unit-tested) and
+- **Module 2 — axis bounce logic, native tests, run mode.** Added `Axis`
+  (pure bounce decision logic, natively unit-tested) and
   `GantryController` (hardware glue), extended `BringupConsole` with
   `run`/`halt`/`sx`/`sy`/`st`, re-added `[env:native]` for `pio test`, and
   fixed the `loop()` ordering so sensors update exactly once per tick.
-- **Module 3 — planned, not built.** Hardware calibration values (the real
+- **Module 3 (this module) — verification and hardening.** The `Axis`
+  bounce logic had never actually been run by any test before this
+  module — ran the existing 11 native tests for the first time (all
+  passed; no fix was needed). Added `STUCK_AT_LIMIT` to close the safety
+  gap where a carriage resting at an end with inverted motor wiring could
+  otherwise push into its end stop for up to `maxTravelMs`. Extended the
+  native test suite with threshold boundary tests, a stuck-at-limit test,
+  inverted-mapping simulated-carriage runs, and a deterministic
+  xorshift32 fuzz test. Confirmed, via a four-mutation sanity check on
+  `Axis.cpp` (each mutation restored afterward), that the test suite can
+  actually catch a broken rule rather than passing regardless of what the
+  code does. Also audited and fixed `GantryController`'s per-motor
+  command cache so a jog can never leave it holding a stale value.
+- **Module 4 — planned, not built.** Hardware calibration values (the real
   pin map, sensor polarity, and `X_FORWARD_IS_TOWARD_MAX`/
   `Y_FORWARD_IS_TOWARD_MAX` once observed on the physical board), optional
   NVS persistence of run speeds across reboots, an `AUTO_RUN_ON_BOOT` flag
