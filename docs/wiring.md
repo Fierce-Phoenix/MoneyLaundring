@@ -98,10 +98,14 @@ with no USB connection at all:
 - `AUTO_RUN_ON_BOOT` (default `false` in `config.h`) is meant for exactly
   this mode: with no USB connected, there is no serial console to type
   `arm`/`run` into, so an operator who wants the gantry to start on its
-  own after a power cycle sets it to `true`. It only fires after a
-  genuine power-on reset and reuses the normal `arm`/`run` code paths —
-  see `docs/hardware-test.md`'s standalone-mode section and the README's
-  safety rules.
+  own sets it to `true`. Be clear about what "fires" means here: on the
+  classic ESP32, `esp_reset_reason()` cannot tell an EN-pin/reset-button
+  reset apart from a true power cycle - both report `ESP_RST_POWERON` -
+  so with the flag true, any hardware reset (not only unplugging and
+  replugging 12V) starts the countdown. It reuses the normal `arm`/`run`
+  code paths and the countdown is cancelable by any serial byte - see
+  `docs/hardware-test.md`'s standalone-mode section and the README's
+  safety rules for the full contract.
 
 ## Final constants (as of Module 4)
 

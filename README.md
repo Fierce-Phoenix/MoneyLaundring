@@ -141,11 +141,21 @@ below).
   code path that bypasses this clamp.
 - Any axis fault stops both motors immediately and disarms the console.
   There is no automatic retry.
-- `AUTO_RUN_ON_BOOT` defaults to `false`. When enabled, it only ever
-  fires after a genuine power-on reset (never after a software reset,
-  panic, watchdog reset, or brownout), prints a countdown that any
-  received serial byte cancels, and - when it does fire - calls exactly
-  the same internal `arm`/`run` code paths the typed commands use. See
+- `AUTO_RUN_ON_BOOT` defaults to `false`. When enabled, it starts the
+  countdown after **any hardware reset** - every flash, every press of
+  the physical reset/EN button, and every time a serial monitor or
+  `esptool` opens the port and toggles DTR/RTS (which also pulls EN low
+  on the classic ESP32) - because the classic ESP32 cannot distinguish
+  an EN-pin reset from a true power cycle; both report
+  `esp_reset_reason() == ESP_RST_POWERON`. It never fires after a
+  software reset (`esp_restart()`), a panic, a watchdog reset, or a
+  brownout - those are the guards that actually hold, along with the
+  flag defaulting to `false` and the cancel-on-any-byte countdown window.
+  When it does fire, it calls exactly the same internal `arm`/`run` code
+  paths the typed commands use. Enable it only for the final standalone
+  flash, keep hands clear of the gantry for the whole countdown, and
+  read the always-printed `[boot] reset reason: ...` line as the
+  evidence of what actually happened. See
   [`docs/hardware-test.md`](docs/hardware-test.md) for when to actually
   turn it on.
 
@@ -191,8 +201,10 @@ for the full module-by-module history and design rationale.
 - **Module 4 (current) - reproducible testing, run telemetry, auto-run,
   final docs.** Reproducible `pio test -e native` via Docker when no host
   g++ is available; `.gitattributes`/`.editorconfig`; observation-only run
-  telemetry (`RUN_TELEMETRY`); `AUTO_RUN_ON_BOOT` gated on a genuine
-  power-on reset, reusing the exact arm/run code paths; this README and
+  telemetry (`RUN_TELEMETRY`); `AUTO_RUN_ON_BOOT` gated on
+  `esp_reset_reason() == ESP_RST_POWERON` (any hardware reset - flash,
+  reset button, or a serial monitor opening - not a true power cycle
+  specifically), reusing the exact arm/run code paths; this README and
   the hardware-test checklist. See `docs/architecture.md` for the known
   limitations and `reports/module-4-report.md` for the full writeup.
 

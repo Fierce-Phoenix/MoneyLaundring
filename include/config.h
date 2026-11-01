@@ -176,10 +176,20 @@ constexpr bool RUN_TELEMETRY = true;
 
 // When true, BringupConsole::begin() schedules an automatic arm+run after
 // AUTO_RUN_DELAY_MS, but ONLY if the ESP32's reset reason (esp_reset_reason())
-// is ESP_RST_POWERON (a genuine cold power-on, not a software reset, panic,
-// watchdog reset, brownout, or wake from deep sleep). This is meant for the
-// finished, standalone-power operator mode (see docs/hardware-test.md),
-// never for bring-up or bench testing — hence the default of false. Any
+// is ESP_RST_POWERON. On the classic ESP32 this is NOT a true-power-cycle-
+// only guard: ESP_RST_EXT ("Reset by external pin") is documented in
+// esp_system.h as "not applicable for ESP32", meaning this chip has no
+// separate reset-reason code for an EN-pin/reset-button reset — every
+// hardware reset (EN pin, reset button, a flash, or a serial monitor/
+// esptool opening the port and toggling DTR/RTS) reports ESP_RST_POWERON
+// the same as a true power cycle. So this gate really means "any hardware
+// reset, not a software restart/panic/watchdog/brownout", not "only a
+// literal power-on." The guards that actually hold are: the flag
+// defaulting to false, the cancel-on-any-byte countdown window below, and
+// reusing the exact arm/run code paths (never a separate motion path).
+// This is meant for the finished, standalone-power operator mode (see
+// docs/hardware-test.md) — enable it only for the final standalone flash,
+// never for bring-up or bench testing, hence the default of false. Any
 // byte received from serial during the countdown cancels it (and is
 // discarded, not treated as a command). On expiry, it calls exactly the
 // same internal arm/run code paths the typed `arm`/`run` commands use;

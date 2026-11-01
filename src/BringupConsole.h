@@ -109,10 +109,13 @@ class BringupConsole {
 
   // Auto-run on boot (Module 4). Set up once in begin(), consumed by
   // updateAutoRun()/update(). See config.h's AUTO_RUN_ON_BOOT comment for
-  // the full contract: fires only once, only on a genuine power-on reset,
-  // cancelable by any serial byte during the countdown, and always calls
-  // cmdArm()/cmdRun() - the exact same internal paths the typed `arm` and
-  // `run` commands use - never a separate motion path.
+  // the full contract: fires only once, on any hardware reset the classic
+  // ESP32 reports as ESP_RST_POWERON (EN pin, reset button, a reflash, or
+  // a serial monitor opening the port - not only a true power cycle, since
+  // this chip has no separate reset-reason code for an external-pin
+  // reset), cancelable by any serial byte during the countdown, and
+  // always calls cmdArm()/cmdRun() - the exact same internal paths the
+  // typed `arm` and `run` commands use - never a separate motion path.
   bool _autoRunPending = false;
   unsigned long _autoRunStartMs = 0;
 };

@@ -155,10 +155,23 @@ gantry has run cleanly multiple times under supervision:
    rule, never power the ESP32 from both sources at once.
 5. Only now consider enabling `AUTO_RUN_ON_BOOT = true` in `config.h` (it
    defaults to `false`) if you want the gantry to start bouncing on its
-   own after a power-on with no operator present. It only ever fires
-   after a genuine power-on reset, prints a countdown first (any serial
-   byte - e.g. plugging in a USB-serial debug cable - cancels it), and
-   calls the exact same internal arm/run paths as typing `arm` then
-   `run`. A fault still disarms and never auto-retries even in this mode.
+   own with no operator present. Understand exactly what this flag does
+   before enabling it: on the classic ESP32, `esp_reset_reason()` cannot
+   tell an EN-pin/reset-button reset apart from a true power cycle - both
+   report `ESP_RST_POWERON` - so with the flag true, **every reflash,
+   every press of the physical reset button, and every time a serial
+   monitor or `esptool` opens the port** (which toggles DTR/RTS and
+   resets the board the same way) **starts the countdown**, not only a
+   literal power-cycle. The guards that actually hold are: the flag
+   defaults to `false`; any received serial byte during the countdown
+   cancels it; and firing always reuses the exact same internal
+   `arm`/`run` code paths as typing `arm` then `run` manually - there is
+   no separate auto-run motion path. A fault still disarms and never
+   auto-retries even in this mode. Enable this flag only for the final
+   standalone flash (reflash with it set to `false` for every bring-up/
+   bench session), keep your hands clear of the gantry for the entire
+   `AUTO_RUN_DELAY_MS` countdown after every reset from then on, and read
+   the boot banner's always-printed `[boot] reset reason: ...` line on
+   the bench as the evidence of what reset actually happened.
 6. Power on from 12V only and confirm the gantry behaves as expected
    before leaving it unattended.

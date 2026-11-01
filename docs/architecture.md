@@ -241,8 +241,13 @@ controller always acts on this tick's debounced reading, not a stale one.
   `st`) — strictly read-only with respect to motor commands, evaluated
   after `applyAxisCommand()` has already decided the tick's motor
   command. Added `AUTO_RUN_ON_BOOT`/`AUTO_RUN_DELAY_MS` (default off),
-  gated on `esp_reset_reason() == ESP_RST_POWERON`, cancelable by any
-  serial byte during the countdown, reusing the exact `cmdArm()`/
+  gated on `esp_reset_reason() == ESP_RST_POWERON` — on the classic
+  ESP32 this reason covers any hardware reset (EN pin / reset button /
+  DTR-RTS toggle from a serial monitor or `esptool`, as well as a true
+  power cycle; `ESP_RST_EXT` is explicitly documented as "not applicable
+  for ESP32" in `esp_system.h`, i.e. there is no separate code for an
+  external-pin reset on this chip), not power-on specifically — cancelable
+  by any serial byte during the countdown, reusing the exact `cmdArm()`/
   `cmdRun()` paths the typed commands use — never a separate motion
   path, and a fault never auto-retries. Rewrote the README as the final
   operator document and added `docs/hardware-test.md`, the step-by-step
