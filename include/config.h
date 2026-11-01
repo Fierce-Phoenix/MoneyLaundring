@@ -154,3 +154,18 @@ constexpr uint32_t MAX_CLEAR_MS = 3000;
 // always clamped to MAX_DUTY by GantryController.
 constexpr uint8_t RUN_SPEED_X = DEFAULT_SPEED;
 constexpr uint8_t RUN_SPEED_Y = DEFAULT_SPEED;
+
+// ---------------------------------------------------------------------------
+// Run telemetry (Module 4) — observation only, never affects motor commands
+// ---------------------------------------------------------------------------
+
+// When true, GantryController prints a line on every reversal (time since
+// the last reversal/start, including the post-reversal pause, and the
+// running reversal count) and a line when the carriage clears the limit
+// sensor it just reversed off of (time from when the axis was first
+// allowed to run again after the reversal to the moment that behind-limit
+// sensor goes inactive). It also tracks the longest segment time and the
+// longest clear time seen since the last `run`, shown by `st`, reset at
+// the start of every run. Purely observational: nothing in this feature
+// ever changes a motor command.
+constexpr bool RUN_TELEMETRY = true;

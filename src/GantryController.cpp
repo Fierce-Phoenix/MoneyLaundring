@@ -80,6 +80,10 @@ void GantryController::startRun(uint32_t nowMs) {
   _axisY.start(nowMs, AxisDir::TOWARD_MAX);
   _cmdX = MotorCommandState{};
   _cmdY = MotorCommandState{};
+  _telX = AxisTelemetry{};
+  _telY = AxisTelemetry{};
+  _telX.lastEventMs = nowMs;
+  _telY.lastEventMs = nowMs;
   _running = true;
 }
 
@@ -126,7 +130,7 @@ void GantryController::setSpeedY(uint8_t duty) {
 }
 
 void GantryController::printAxisStatusLine(const char *axisName, const Axis &axis,
-                                            uint8_t speed) {
+                                            uint8_t speed, const AxisTelemetry &telemetry) {
   Serial.print("  ");
   Serial.print(axisName);
   Serial.print(": state=");
@@ -138,13 +142,20 @@ void GantryController::printAxisStatusLine(const char *axisName, const Axis &axi
   Serial.print(" reversals=");
   Serial.print(axis.getReversalCount());
   Serial.print(" fault=");
-  Serial.println(faultName(axis.getFault()));
+  Serial.print(faultName(axis.getFault()));
+  if (RUN_TELEMETRY) {
+    Serial.print(" longestSegmentMs=");
+    Serial.print(telemetry.longestSegmentMs);
+    Serial.print(" longestClearMs=");
+    Serial.print(telemetry.longestClearMs);
+  }
+  Serial.println();
 }
 
 void GantryController::printStatus() {
   Serial.println("[st] gantry status:");
-  printAxisStatusLine("X", _axisX, _speedX);
-  printAxisStatusLine("Y", _axisY, _speedY);
+  printAxisStatusLine("X", _axisX, _speedX, _telX);
+  printAxisStatusLine("Y", _axisY, _speedY, _telY);
   Serial.print("  running=");
   Serial.println(_running ? "YES" : "no");
 }
@@ -158,6 +169,67 @@ bool GantryController::takeFaultFlag() {
 void GantryController::invalidateCommandCache() {
   _cmdX = MotorCommandState{};
   _cmdY = MotorCommandState{};
+}
+
+// Module 4: purely observational run telemetry. Never calls
+// Motor::drive()/stop(), never writes to an Axis, and never influences
+// applyAxisCommand() or the fault path in update() — it only reads the
+// AxisOutput/Axis/sensor state already computed by update() for this tick
+// and prints a line / updates a running maximum. No-op entirely when
+// RUN_TELEMETRY (config.h) is false.
+void GantryController::updateTelemetry(const char *axisName, AxisTelemetry &telemetry,
+                                        const Axis &axis, const AxisOutput &out,
+                                        bool minActive, bool maxActive, uint32_t nowMs) {
+  if (!RUN_TELEMETRY) {
+    return;
+  }
+
+  if (out.reversed) {
+    const uint32_t elapsed = nowMs - telemetry.lastEventMs;  // unsigned, rollover-safe
+    if (elapsed > telemetry.longestSegmentMs) {
+      telemetry.longestSegmentMs = elapsed;
+    }
+    Serial.print("[run] ");
+    Serial.print(axisName);
+    Serial.print(" reversed -> ");
+    Serial.print(dirName(out.dir));
+    Serial.print(" after ");
+    Serial.print(elapsed);
+    Serial.print(" ms (includes the pause), reversal ");
+    Serial.println(axis.getReversalCount());
+    telemetry.lastEventMs = nowMs;
+    telemetry.waitingForRunAfterReversal = true;
+    telemetry.waitingForClear = false;
+    return;  // this tick is fully accounted for; nothing else to evaluate
+  }
+
+  // First tick the axis is allowed to run again after a reversal (the
+  // post-reversal pause has elapsed): start the clear-time clock.
+  if (telemetry.waitingForRunAfterReversal && out.run) {
+    telemetry.waitingForRunAfterReversal = false;
+    telemetry.waitingForClear = true;
+    telemetry.clearStartMs = nowMs;
+  }
+
+  if (telemetry.waitingForClear) {
+    // "Behind" is relative to the heading the axis reversed INTO (out.dir),
+    // i.e. the end it just reversed off of — same definition Axis.cpp uses
+    // internally for OPPOSITE_LIMIT_HIT/STUCK_AT_LIMIT.
+    const bool behindIsMin = (out.dir == AxisDir::TOWARD_MAX);
+    const bool behindActive = behindIsMin ? minActive : maxActive;
+    if (!behindActive) {
+      const uint32_t clearElapsed = nowMs - telemetry.clearStartMs;  // rollover-safe
+      if (clearElapsed > telemetry.longestClearMs) {
+        telemetry.longestClearMs = clearElapsed;
+      }
+      Serial.print("[run] ");
+      Serial.print(axisName);
+      Serial.print(" cleared the end in ");
+      Serial.print(clearElapsed);
+      Serial.println(" ms");
+      telemetry.waitingForClear = false;
+    }
+  }
 }
 
 void GantryController::printFaultLine(const char *axisName, AxisFault fault) {
@@ -231,4 +303,11 @@ void GantryController::update(uint32_t nowMs) {
 
   applyAxisCommand(*_motorX, outX, _speedX, X_FORWARD_IS_TOWARD_MAX, _cmdX);
   applyAxisCommand(*_motorY, outY, _speedY, Y_FORWARD_IS_TOWARD_MAX, _cmdY);
+
+  // Module 4: observation only, strictly after the motor commands above
+  // have already been decided and issued for this tick. Reads the same
+  // AxisOutput/sensor values applyAxisCommand() just used but never calls
+  // Motor::drive()/stop() or writes to an Axis itself.
+  updateTelemetry("X", _telX, _axisX, outX, _xMin->active(), _xMax->active(), nowMs);
+  updateTelemetry("Y", _telY, _axisY, outY, _yMin->active(), _yMax->active(), nowMs);
 }

@@ -105,5 +105,38 @@ class GantryController {
   void applyAxisCommand(Motor &motor, const AxisOutput &out, uint8_t speed,
                          bool forwardIsTowardMax, MotorCommandState &cmd);
   void printFaultLine(const char *axisName, AxisFault fault);
-  void printAxisStatusLine(const char *axisName, const Axis &axis, uint8_t speed);
+
+  // Per-axis run telemetry (Module 4). Purely observational bookkeeping:
+  // nothing in here ever calls Motor::drive()/stop() or changes an Axis's
+  // state. Reset at every startRun(); updated (and occasionally prints a
+  // line) once per update() tick while running.
+  struct AxisTelemetry {
+    uint32_t lastEventMs = 0;   // time of the last reversal, or of start()
+    uint32_t longestSegmentMs = 0;
+    uint32_t longestClearMs = 0;
+    // Between a reversal and the first tick the axis is allowed to run
+    // again (i.e. once the post-reversal pause elapses).
+    bool waitingForRunAfterReversal = false;
+    // Between that first running tick and the behind-limit sensor going
+    // inactive (the carriage physically clearing the end it reversed off).
+    bool waitingForClear = false;
+    uint32_t clearStartMs = 0;
+  };
+
+  void printAxisStatusLine(const char *axisName, const Axis &axis, uint8_t speed,
+                            const AxisTelemetry &telemetry);
+
+  AxisTelemetry _telX;
+  AxisTelemetry _telY;
+
+  // Observes one axis's AxisOutput for this tick and the current debounced
+  // limit-sensor readings; prints a "[run] <axis> reversed -> ..." line on
+  // every reversal and a "[run] <axis> cleared the end in N ms" line once
+  // the behind-limit sensor goes inactive after a reversal; updates the
+  // longest-segment/longest-clear running maxima. Read-only with respect
+  // to motor commands: never calls Motor::drive()/stop() and never writes
+  // to an Axis. No-op entirely if RUN_TELEMETRY (config.h) is false.
+  void updateTelemetry(const char *axisName, AxisTelemetry &telemetry,
+                        const Axis &axis, const AxisOutput &out,
+                        bool minActive, bool maxActive, uint32_t nowMs);
 };
