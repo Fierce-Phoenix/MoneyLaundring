@@ -169,3 +169,26 @@ constexpr uint8_t RUN_SPEED_Y = DEFAULT_SPEED;
 // the start of every run. Purely observational: nothing in this feature
 // ever changes a motor command.
 constexpr bool RUN_TELEMETRY = true;
+
+// ---------------------------------------------------------------------------
+// Auto-run on boot (Module 4) — defaults OFF
+// ---------------------------------------------------------------------------
+
+// When true, BringupConsole::begin() schedules an automatic arm+run after
+// AUTO_RUN_DELAY_MS, but ONLY if the ESP32's reset reason (esp_reset_reason())
+// is ESP_RST_POWERON (a genuine cold power-on, not a software reset, panic,
+// watchdog reset, brownout, or wake from deep sleep). This is meant for the
+// finished, standalone-power operator mode (see docs/hardware-test.md),
+// never for bring-up or bench testing — hence the default of false. Any
+// byte received from serial during the countdown cancels it (and is
+// discarded, not treated as a command). On expiry, it calls exactly the
+// same internal arm/run code paths the typed `arm`/`run` commands use;
+// there is no separate auto-run motion path. If a fault occurs, the
+// console's existing fault-disarm behavior applies as normal and auto-run
+// never retries — a fault always requires a manual `arm`/`run` afterward.
+constexpr bool AUTO_RUN_ON_BOOT = false;
+
+// Countdown (ms) between setup() calling BringupConsole::begin() and the
+// scheduled auto-run actually firing, during which any received serial
+// byte cancels it.
+constexpr unsigned long AUTO_RUN_DELAY_MS = 10000;

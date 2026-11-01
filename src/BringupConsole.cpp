@@ -1,5 +1,7 @@
 #include "BringupConsole.h"
 
+#include <esp_system.h>
+
 #include "config.h"
 
 namespace {
@@ -20,6 +22,38 @@ bool isMotorDriverPin(uint8_t pin) {
          pin == Y_IN3 || pin == Y_IN4;
 }
 
+// Module 4: human-readable name for esp_reset_reason_t, printed on every
+// boot regardless of AUTO_RUN_ON_BOOT so the reset reason is always
+// visible in the log.
+const char *resetReasonName(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_UNKNOWN:
+      return "UNKNOWN";
+    case ESP_RST_POWERON:
+      return "POWERON";
+    case ESP_RST_EXT:
+      return "EXT";
+    case ESP_RST_SW:
+      return "SW";
+    case ESP_RST_PANIC:
+      return "PANIC";
+    case ESP_RST_INT_WDT:
+      return "INT_WDT";
+    case ESP_RST_TASK_WDT:
+      return "TASK_WDT";
+    case ESP_RST_WDT:
+      return "WDT";
+    case ESP_RST_DEEPSLEEP:
+      return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:
+      return "BROWNOUT";
+    case ESP_RST_SDIO:
+      return "SDIO";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 }  // namespace
 
 void BringupConsole::begin(Motor &motorX, Motor &motorY, LimitSensor &xMin,
@@ -37,6 +71,31 @@ void BringupConsole::begin(Motor &motorX, Motor &motorY, LimitSensor &xMin,
   _jogDuty = DEFAULT_SPEED;
   _lastCommandMs = millis();
   _lastMonitorMs = millis();
+
+  // Module 4: the reset reason is always printed, whether or not auto-run
+  // is enabled or fires, so the operator can tell at a glance why the
+  // board came up (or why auto-run was skipped).
+  esp_reset_reason_t reason = esp_reset_reason();
+  Serial.print("[boot] reset reason: ");
+  Serial.println(resetReasonName(reason));
+
+  if (!AUTO_RUN_ON_BOOT) {
+    return;
+  }
+  if (reason != ESP_RST_POWERON) {
+    Serial.print("[boot] AUTO_RUN_ON_BOOT is true but reset reason is not "
+                  "POWERON (");
+    Serial.print(resetReasonName(reason));
+    Serial.println("); auto-run skipped.");
+    return;
+  }
+
+  _autoRunPending = true;
+  _autoRunStartMs = millis();
+  Serial.print("[boot] AUTO_RUN_ON_BOOT: power-on reset detected. "
+                "Auto-arm+run in ");
+  Serial.print(AUTO_RUN_DELAY_MS);
+  Serial.println(" ms. Send any character now to cancel.");
 }
 
 void BringupConsole::printPinMapAndTunables() {
@@ -108,6 +167,13 @@ void BringupConsole::printPinMapAndTunables() {
   Serial.print(RUN_SPEED_X);
   Serial.print("  RUN_SPEED_Y=");
   Serial.println(RUN_SPEED_Y);
+  Serial.println("  Module 4:");
+  Serial.print("    RUN_TELEMETRY=");
+  Serial.println(RUN_TELEMETRY ? "true" : "false");
+  Serial.print("    AUTO_RUN_ON_BOOT=");
+  Serial.print(AUTO_RUN_ON_BOOT ? "true" : "false");
+  Serial.print("  AUTO_RUN_DELAY_MS=");
+  Serial.println(AUTO_RUN_DELAY_MS);
 }
 
 void BringupConsole::printBanner() {
@@ -587,6 +653,26 @@ void BringupConsole::updateFaultPoll() {
   }
 }
 
+void BringupConsole::updateAutoRun(unsigned long nowMs) {
+  if (!_autoRunPending) {
+    return;
+  }
+  if (nowMs - _autoRunStartMs < AUTO_RUN_DELAY_MS) {
+    return;  // countdown still running
+  }
+
+  _autoRunPending = false;
+  Serial.println("[boot] AUTO_RUN_ON_BOOT: countdown elapsed, auto-arming "
+                  "and running now.");
+  // Reuses the exact same internal paths the typed `arm` and `run`
+  // commands use - there is no separate auto-run motion path. cmdArm()
+  // updates _lastCommandMs itself (feeding the normal idle auto-disarm
+  // timer); cmdRun() checks _armed, scan/jog state, and whether the
+  // gantry is already running, exactly as it does for a typed `run`.
+  cmdArm(nowMs);
+  cmdRun(nowMs);
+}
+
 void BringupConsole::update(unsigned long nowMs) {
   // Sensor updates and GantryController::update() happen once per loop in
   // main.cpp, before this call, so no sensor is ever updated twice in one
@@ -594,6 +680,20 @@ void BringupConsole::update(unsigned long nowMs) {
   // machines (jog/scan/monitor/arm-timeout), plus polling the gantry's
   // fault latch.
   updateFaultPoll();
+
+  // Module 4: any byte received while an auto-run countdown is pending
+  // cancels it immediately and is discarded entirely (not fed to
+  // handleLine as a command), per AUTO_RUN_ON_BOOT's contract. Checked
+  // before the normal read loop below so a cancelling byte can never also
+  // be interpreted as the start of a command.
+  if (_autoRunPending && Serial.available() > 0) {
+    while (Serial.available() > 0) {
+      Serial.read();
+    }
+    _autoRunPending = false;
+    Serial.println("[boot] AUTO_RUN_ON_BOOT: cancelled by serial input.");
+    return;
+  }
 
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
@@ -609,4 +709,5 @@ void BringupConsole::update(unsigned long nowMs) {
   updateJog(nowMs);
   updateScan(nowMs);
   updateMonitor(nowMs);
+  updateAutoRun(nowMs);
 }

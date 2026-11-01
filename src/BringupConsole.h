@@ -100,9 +100,19 @@ class BringupConsole {
   void updateScan(unsigned long nowMs);
   void updateMonitor(unsigned long nowMs);
   void updateFaultPoll();
+  void updateAutoRun(unsigned long nowMs);
 
   void printPinMapAndTunables();
   void printSensorLine();
   void applyActiveLevelToSensors();
   Motor *motorFor(JogAxis axis);
+
+  // Auto-run on boot (Module 4). Set up once in begin(), consumed by
+  // updateAutoRun()/update(). See config.h's AUTO_RUN_ON_BOOT comment for
+  // the full contract: fires only once, only on a genuine power-on reset,
+  // cancelable by any serial byte during the countdown, and always calls
+  // cmdArm()/cmdRun() - the exact same internal paths the typed `arm` and
+  // `run` commands use - never a separate motion path.
+  bool _autoRunPending = false;
+  unsigned long _autoRunStartMs = 0;
 };
