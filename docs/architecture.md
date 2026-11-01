@@ -225,13 +225,57 @@ controller always acts on this tick's debounced reading, not a stale one.
   actually catch a broken rule rather than passing regardless of what the
   code does. Also audited and fixed `GantryController`'s per-motor
   command cache so a jog can never leave it holding a stale value.
-- **Module 4 — planned, not built.** Hardware calibration values (the real
-  pin map, sensor polarity, and `X_FORWARD_IS_TOWARD_MAX`/
-  `Y_FORWARD_IS_TOWARD_MAX` once observed on the physical board), optional
-  NVS persistence of run speeds across reboots, an `AUTO_RUN_ON_BOOT` flag
-  (defaulting off — nothing auto-starts without this module explicitly
-  adding and enabling it), the final README, and a manual hardware test
-  checklist.
+- **Module 4 (this module) — reproducible testing, run telemetry,
+  auto-run, final docs.** `pio test -e native` needs a host g++; added
+  `scripts/test-native.cmd`/`.sh`, which fall back to a pinned Docker
+  image (`docker/Dockerfile.native-test`, PlatformIO 6.2.0) when none is
+  found, with `PLATFORMIO_BUILD_DIR` pointed inside the container (never
+  the mounted repo's `.pio\build`) and `PLATFORMIO_CORE_DIR` backed by a
+  named volume so the native platform downloads once. Added
+  `.gitattributes`/`.editorconfig` (every tracked blob was already stored
+  as LF; the one working-tree CRLF anomaly found via `git ls-files --eol`
+  was a local checkout artifact of `core.autocrlf=true`, not mixed
+  content in the repo, so no renormalize commit was needed). Added
+  observation-only `RUN_TELEMETRY` to `GantryController` (reversal and
+  clear-time lines, longest-segment/longest-clear tracking shown in
+  `st`) — strictly read-only with respect to motor commands, evaluated
+  after `applyAxisCommand()` has already decided the tick's motor
+  command. Added `AUTO_RUN_ON_BOOT`/`AUTO_RUN_DELAY_MS` (default off),
+  gated on `esp_reset_reason() == ESP_RST_POWERON`, cancelable by any
+  serial byte during the countdown, reusing the exact `cmdArm()`/
+  `cmdRun()` paths the typed commands use — never a separate motion
+  path, and a fault never auto-retries. Rewrote the README as the final
+  operator document and added `docs/hardware-test.md`, the step-by-step
+  bench calibration checklist.
 
 Each module ends with a completion report in `reports/`. The next module
 should be written only after reading the previous module's report.
+
+## Known limitations (as of Module 4)
+
+- **No persistence.** Run speeds (`sx`/`sy`), the sensor active level set
+  via `pol`, and any other runtime-adjusted value reset to their
+  `config.h` compiled-in defaults on every reboot. There is no NVS (or
+  other) storage layer in this firmware.
+- **`GantryController` has never been tested against real hardware.**
+  `Axis` (the pure bounce-decision logic) is natively unit-tested and
+  mutation-checked (Module 3); `GantryController`, the glue that drives
+  real `Motor`/`LimitSensor` objects from `Axis`'s output, including the
+  Module 4 run-telemetry logic layered on top of it, has only ever been
+  exercised by compiling for `esp32dev` — never flashed to or run on the
+  physical gantry.
+- **Run speed is adjustable only over serial.** There is no physical
+  knob, button, or other input device; `sx`/`sy`/`speed` are the only way
+  to change it, and only while a serial connection is available (or, once
+  set at compile time via `RUN_SPEED_X`/`RUN_SPEED_Y`, not adjustable at
+  all in standalone mode without a serial cable).
+- **Hardware calibration is an operator step, not a module.** The pin
+  map, sensor polarity, and `X_FORWARD_IS_TOWARD_MAX`/
+  `Y_FORWARD_IS_TOWARD_MAX` cannot be determined from a dev machine
+  without the physical gantry in front of someone; no module in this
+  repo claims to have done this. `docs/hardware-test.md` is the
+  checklist an operator with the real board follows to do it once, after
+  which the discovered values should be committed back into
+  `include/config.h`/`docs/wiring.md`, but that act is calibration, not
+  firmware development.
+

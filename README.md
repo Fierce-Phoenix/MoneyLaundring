@@ -1,119 +1,202 @@
 # MoneyLaundring
 
-ESP32 controller for a two-axis rack-and-pinion gantry ("moving dartboard").
-Each axis drives its motor until an IR sensor at that end detects the
-black-body endpoint, then reverses, with adjustable speed per axis. See
-[`docs/architecture.md`](docs/architecture.md) for the full build order and
-design decisions.
+ESP32 firmware for a two-axis rack-and-pinion gantry ("moving dartboard").
+Each axis drives a motor until an IR sensor at that end detects the
+black-body endpoint, then reverses, bouncing back and forth indefinitely
+with an independently adjustable speed per axis.
+
+Everything in this repo is built and native-tested; **nothing has been
+run on the physical board**. The pin map, sensor polarity, and the
+FORWARD-direction mapping constants are all provisional defaults that
+must be confirmed on real hardware before ever typing `run`. See
+[`docs/hardware-test.md`](docs/hardware-test.md) for the bench checklist
+that does exactly that.
 
 ## Hardware
 
-38-pin ESP32 DevKit (micro-USB) · red L298N dual H-bridge, 12V barrel-jack
-fed · 2× TT gear motors on perpendicular rack-and-pinion axes · 4× 3-pin IR
-obstacle modules (VCC/GND/OUT, LM393 trim-pot), 2 per axis. Full pin map and
-hookup instructions in [`docs/wiring.md`](docs/wiring.md).
+- 38-pin ESP32 DevKit (micro-USB)
+- Red L298N dual H-bridge motor driver, 12V barrel-jack fed
+- 2x TT gear motors, each on its own 3D-printed rack-and-pinion axis
+  (the two axes are perpendicular)
+- 4x 3-pin IR obstacle modules (VCC/GND/OUT, LM393 trim-pot), 2 per axis,
+  one at each end of travel
 
-> **The pin map, sensor polarity, and FORWARD-direction mapping are all
-> unconfirmed defaults**, not verified against the real board. Use the
-> `scan`, `mon`, `pol`, and `xf`/`xr`/`yf`/`yr` console commands to check
-> them before ever typing `run`. See the calibration step in
-> [`docs/wiring.md`](docs/wiring.md).
+Full pin map, power/ground rules, and the standalone-power option are in
+[`docs/wiring.md`](docs/wiring.md).
 
 ## How it works
 
-Two independent axes. The reversing decision lives in a pure, hardware-
-independent `Axis` class (unit-tested natively, no ESP32 required — see
-`test/test_axis/`): each axis drives toward one end, and once the sensor
-there goes active, reverses after a short pause, with a lockout so sensor
-chatter can't cause a second reversal too soon. `GantryController` is the
-only class that connects `Axis` to the real `Motor`/`LimitSensor` hardware.
-Design details in [`docs/architecture.md`](docs/architecture.md).
+Two independent axes. The reversing decision lives in a pure,
+hardware-independent `Axis` class (unit-tested natively, no ESP32
+required - see `test/test_axis/`): each axis drives toward one end, and
+once the sensor there goes active, reverses after a short pause, with a
+lockout so sensor chatter can't cause a second reversal too soon.
+`GantryController` is the only class that connects `Axis` to the real
+`Motor`/`LimitSensor` hardware. Design details and the full module-by-module
+build history are in [`docs/architecture.md`](docs/architecture.md).
 
-## Build (PlatformIO)
+## Quick start
+
+1. **Flash.** `pio run -e esp32dev -t upload` (USB connected, 12V supply
+   can be connected or not).
+2. **Open the serial console.** `pio device monitor` at 115200 baud. The
+   boot banner reprints the full pin map and tunables and warns that the
+   pin map is unconfirmed.
+3. **Calibrate against the real board first.** Do not type `arm` or
+   `run` yet - walk through [`docs/hardware-test.md`](docs/hardware-test.md),
+   which uses `scan`, `mon`, `pol`, and `xf`/`xr`/`yf`/`yr` to confirm the
+   sensor pins, sensor polarity, and the FORWARD-direction mapping
+   constants against the actual wiring, editing `include/config.h` as
+   needed and reflashing.
+4. **First run.** Once calibrated, `arm` then `run` starts autonomous
+   bouncing on both axes. `st` reports live status; `halt` stops the
+   autonomous bounce while staying armed; `stop` stops everything and
+   disarms.
+
+## Build and test (PlatformIO)
 
 ```
-pio run -e esp32dev          # compile for the ESP32
+pio run -e esp32dev           # compile for the ESP32
 pio run -e esp32dev -t upload # flash
 pio device monitor            # serial console @ 115200
-pio test -e native             # run the native Axis unit tests (no board needed)
+pio test -e native            # run the native Axis unit tests (no board needed)
 ```
 
-## Testing
+### Running the native tests reproducibly
 
 `pio test -e native` needs a host g++ toolchain. If you don't have one on
 PATH, use the reproducible wrapper scripts instead:
 
 - `scripts\test-native.cmd` (Windows) / `scripts/test-native.sh`
-  (Linux/macOS/Git Bash) each check for `g++` on PATH first (fast path, runs
-  `pio test -e native` directly); if it's missing, they build
+  (Linux/macOS/Git Bash) each check for `g++` on PATH first (fast path,
+  runs `pio test -e native` directly); if it's missing, they build
   `docker/Dockerfile.native-test` once (pinned to PlatformIO 6.2.0, tagged
   `moneylaundring-native-test`) and run the tests inside a throwaway
   container instead.
-- Inside that container, `PLATFORMIO_BUILD_DIR` is set to a path inside the
-  container (`/tmp/pio-native-build`), not under the mounted repo, so the
-  container's build never touches the host's `.pio\build` — confirmed by
-  checking directory timestamps before and after a container run.
+- Inside that container, `PLATFORMIO_BUILD_DIR` is set to a path inside
+  the container (`/tmp/pio-native-build`), not under the mounted repo, so
+  the container's build never touches the host's `.pio\build` - confirmed
+  by checking directory timestamps before and after a container run.
 - `PLATFORMIO_CORE_DIR` (PlatformIO's platform/tool cache) is backed by a
-  named Docker volume (`moneylaundring-pio-core`), so the native platform is
-  downloaded once and reused by every later throwaway container instead of
-  being re-fetched every run.
+  named Docker volume (`moneylaundring-pio-core`), so the native platform
+  is downloaded once and reused by every later throwaway container
+  instead of being re-fetched every run.
 
-Both scripts report `19 of 19 succeeded` when the `Axis` test suite passes.
+Both scripts report `19 of 19 succeeded` when the `Axis` test suite
+passes.
 
-## Console commands (@ 115200, newline-terminated)
+## Command reference (@ 115200 baud, newline-terminated)
 
-| Command       | Effect                                                         |
-|---------------|------------------------------------------------------------------|
-| `?`           | print the command list                                          |
-| `map`         | print the pin map and tunables                                  |
-| `mon`         | toggle the continuous sensor status line (on by default)        |
-| `pol`         | flip the active sensor level at runtime (not while running)     |
-| `scan`        | (disarmed, not running) watch candidate GPIOs for level changes |
+| Command       | Effect |
+|---------------|--------|
+| `?`           | print the command list |
+| `map`         | print the pin map and all tunables, including Module 4's `RUN_TELEMETRY`/`AUTO_RUN_ON_BOOT`/`AUTO_RUN_DELAY_MS` |
+| `mon`         | toggle the continuous sensor status line (on by default) |
+| `pol`         | flip the active sensor level at runtime (not while running) |
+| `scan`        | (disarmed, not running) watch candidate GPIOs for level changes, to find each sensor's real pin |
 | `arm`         | enable motor output; auto-disarms if idle too long (not while running) |
-| `disarm`      | disable motor output (also ends any run)                        |
-| `stop`        | stop both motors immediately and disarm (also ends any run)     |
-| `speed <n>`   | set jog duty 0-255, clamped to `MAX_DUTY` (not while running)   |
-| `xf` / `xr`   | jog axis X forward/reverse for `JOG_MS` (armed, not while running) |
+| `disarm`      | disable motor output (also ends any run) |
+| `stop`        | stop both motors immediately and disarm (also ends any run) |
+| `speed <n>`   | set jog duty 0-255, clamped to `MAX_DUTY` (not while running) |
+| `xf` / `xr`   | jog axis X forward/reverse for `JOG_MS` (armed, not while running) - use with `mon` to see which sensor it approaches |
 | `yf` / `yr`   | jog axis Y forward/reverse for `JOG_MS` (armed, not while running) |
-| `run`         | start autonomous bounce on both axes (armed, idle only)          |
-| `halt`        | stop autonomous bounce, stay armed                               |
+| `run`         | start autonomous bounce on both axes (armed, idle only) |
+| `halt`        | stop autonomous bounce, stay armed |
 | `sx <0-255>`  | set axis X run speed, clamped to `MAX_DUTY` (allowed while running) |
 | `sy <0-255>`  | set axis Y run speed, clamped to `MAX_DUTY` (allowed while running) |
-| `st`          | print gantry status: state, heading, speed, reversals, fault, per axis |
+| `st`          | print gantry status: state, heading, speed, reversals, fault, and (Module 4) the longest segment/clear times seen since the last `run` |
 
-If either axis faults (unexpected endpoint pattern, no endpoint ever seen,
-the carriage never leaving the end it started at, or wiring that implies
-the motor is wired backwards), the controller stops both motors
-immediately, the console auto-disarms, and it prints which axis, which
-fault, and a likely cause.
+While running, two more lines print automatically whenever
+`RUN_TELEMETRY` (on by default) is enabled: `[run] <axis> reversed -> ...`
+on every reversal, and `[run] <axis> cleared the end in ... ms` once the
+carriage clears the sensor it just reversed off of. See
+[`docs/hardware-test.md`](docs/hardware-test.md) for how to use these
+lines to size `MAX_TRAVEL_MS`/`MAX_CLEAR_MS`.
+
+## Fault codes
+
+If either axis faults, `GantryController` stops both motors immediately,
+the console auto-disarms, and it prints which axis, which fault, and a
+likely cause:
+
+| Fault | Cause | Fix |
+|-------|-------|-----|
+| `BOTH_LIMITS_ACTIVE` | both limit sensors on that axis read active at once | sensor polarity or placement is wrong for that axis - check wiring and `pol` |
+| `OPPOSITE_LIMIT_HIT` | the limit sensor *behind* the current heading went active (rising edge) | that axis's FORWARD mapping constant is flipped - flip `X_FORWARD_IS_TOWARD_MAX`/`Y_FORWARD_IS_TOWARD_MAX` in `config.h` |
+| `STUCK_AT_LIMIT` | the behind limit stayed active for `MAX_CLEAR_MS` while the axis was otherwise allowed to run - the carriage never left the end it started/reversed at | classically inverted motor wiring with the carriage already resting at that end: flip the FORWARD mapping constant; otherwise check for a mechanical jam or too low a run speed |
+| `TRAVEL_TIMEOUT` | no endpoint sensor was seen within `MAX_TRAVEL_MS` | check that axis's sensor wiring, or its run speed - `MAX_TRAVEL_MS` may need to be larger for a slower gantry |
+
+A fault is sticky until the next `arm`+`run`; the firmware never
+auto-retries a fault on its own, including via `AUTO_RUN_ON_BOOT` (see
+below).
+
+## Safety rules
+
+- Nothing can move until the operator explicitly types `arm`. Arming
+  auto-expires after `ARM_TIMEOUT_MS` idle, except while an autonomous
+  run is in progress (the safety stops while running are `halt`, `stop`,
+  `disarm`, and a fault, not an idle timer).
+- Every motor-moving command is clamped to `MAX_DUTY` (153 by default,
+  derived from the 12V supply and the motors' ~6V rating); there is no
+  code path that bypasses this clamp.
+- Any axis fault stops both motors immediately and disarms the console.
+  There is no automatic retry.
+- `AUTO_RUN_ON_BOOT` defaults to `false`. When enabled, it only ever
+  fires after a genuine power-on reset (never after a software reset,
+  panic, watchdog reset, or brownout), prints a countdown that any
+  received serial byte cancels, and - when it does fire - calls exactly
+  the same internal `arm`/`run` code paths the typed commands use. See
+  [`docs/hardware-test.md`](docs/hardware-test.md) for when to actually
+  turn it on.
+
+## Repo layout
+
+```
+MoneyLaundring/
+  platformio.ini              ; esp32dev (arduino) + native (Axis unit tests)
+  include/config.h            ; pin map + tunables (see docs/wiring.md)
+  src/
+    main.cpp                  ; wire objects together; setup()/loop()
+    Motor.h  Motor.cpp
+    LimitSensor.h  LimitSensor.cpp
+    Axis.h  Axis.cpp           ; pure bounce logic, no Arduino, no config.h
+    GantryController.h  GantryController.cpp  ; hardware glue + run telemetry
+    BringupConsole.h  BringupConsole.cpp       ; serial console + auto-run
+  test/test_axis/test_axis.cpp ; native Unity tests for Axis
+  scripts/test-native.cmd, test-native.sh      ; reproducible native testing
+  docker/Dockerfile.native-test                ; pinned PlatformIO test image
+  docs/
+    architecture.md            ; design decisions and module history
+    wiring.md                  ; hardware contract: pin map, power, grounding
+    hardware-test.md           ; step-by-step bench calibration checklist
+  reports/                     ; module-N-report.md (gitignored, not committed)
+```
 
 ## Status
 
 Built in modules, each ending with a completion report in `reports/`
-(gitignored, not committed). See `docs/architecture.md` for what's built,
-what's planned, and why the design is split the way it is.
+(gitignored, not committed). See [`docs/architecture.md`](docs/architecture.md)
+for the full module-by-module history and design rationale.
 
-- **Module 1 — bring-up.** `config.h`, `Motor`, `LimitSensor`,
+- **Module 1 - bring-up.** `config.h`, `Motor`, `LimitSensor`,
   `BringupConsole`. No bounce logic.
-- **Module 2 — axis bounce logic, native tests, run mode.** `Axis` (pure
+- **Module 2 - axis bounce logic, native tests, run mode.** `Axis` (pure
   bounce decision logic, native-tested) and `GantryController` (hardware
   glue), extended `BringupConsole` with `run`/`halt`/`sx`/`sy`/`st`.
-- **Module 3 (current) — verification and hardening.** Confirmed the
-  native test suite actually runs and every `Axis` rule is proven by a
-  test that can fail (boundary tests, a stuck-at-limit test, inverted-
-  mapping simulated-carriage runs, a deterministic fuzz test, and a
-  four-mutation sanity check). Closed a safety gap by adding the
-  `STUCK_AT_LIMIT` fault (catches a carriage resting at an end with
-  inverted motor wiring, which `OPPOSITE_LIMIT_HIT` cannot). Removed a
-  hardware-glue risk by auditing and fixing `GantryController`'s
-  per-motor command cache so a jog can never leave a stale cache entry
-  behind for the next `run`.
-- **Module 4 — planned.** Hardware calibration values once observed on the
-  real board, optional NVS persistence of run speeds, an
-  `AUTO_RUN_ON_BOOT` flag defaulting off, the final README, and a hardware
-  test checklist.
+- **Module 3 - verification and hardening.** Confirmed the native test
+  suite actually runs and every `Axis` rule is proven by a test that can
+  fail. Added `STUCK_AT_LIMIT` (catches a carriage resting at an end with
+  inverted motor wiring). Fixed a `GantryController` command-cache gap
+  around jogs.
+- **Module 4 (current) - reproducible testing, run telemetry, auto-run,
+  final docs.** Reproducible `pio test -e native` via Docker when no host
+  g++ is available; `.gitattributes`/`.editorconfig`; observation-only run
+  telemetry (`RUN_TELEMETRY`); `AUTO_RUN_ON_BOOT` gated on a genuine
+  power-on reset, reusing the exact arm/run code paths; this README and
+  the hardware-test checklist. See `docs/architecture.md` for the known
+  limitations and `reports/module-4-report.md` for the full writeup.
 
-Nothing in this repo has been verified against real hardware — there was no
-access to the physical board while writing it. Treat the pin map,
-`SENSOR_ACTIVE_LEVEL`, and `X_FORWARD_IS_TOWARD_MAX`/`Y_FORWARD_IS_TOWARD_MAX`
-as unconfirmed until checked with `scan`/`mon`/`pol`/`xf`/`yf`.
+Hardware calibration (the real pin map, sensor polarity, and
+FORWARD-mapping constants) is an **operator step**, done once on the real
+board via `docs/hardware-test.md`, not something any module can do from a
+dev machine without the physical gantry.

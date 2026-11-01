@@ -78,6 +78,56 @@ their OUT pin actively, not through a pull-up.
   this file incorrectly said to use 5V — that was wrong and is corrected
   here.)
 
+### Standalone power (no USB, Module 4)
+
+Once bring-up and calibration (see `docs/hardware-test.md`) are complete
+and the gantry has run cleanly under supervision, it can run unattended
+with no USB connection at all:
+
+- Fit the L298N's **5V-enable jumper** (the one that routes its onboard
+  5V regulator's output to the board-edge 5V pin), so the L298N supplies
+  5V from the same 12V barrel-jack input instead of needing USB.
+- Wire that L298N 5V output to the ESP32's **5V/VIN** pin — not 3V3; the
+  ESP32 has its own onboard 3.3V regulator fed from 5V/VIN, and feeding
+  5V/VIN directly into the 3V3 pin bypasses that regulator and can damage
+  the board.
+- **Disconnect USB entirely before fitting the 5V-enable jumper / wiring
+  this up**, and keep it disconnected while running standalone. Per the
+  power rule above, the ESP32 must only ever be powered from exactly one
+  source (USB, or L298N 5V) — never both.
+- `AUTO_RUN_ON_BOOT` (default `false` in `config.h`) is meant for exactly
+  this mode: with no USB connected, there is no serial console to type
+  `arm`/`run` into, so an operator who wants the gantry to start on its
+  own after a power cycle sets it to `true`. It only fires after a
+  genuine power-on reset and reuses the normal `arm`/`run` code paths —
+  see `docs/hardware-test.md`'s standalone-mode section and the README's
+  safety rules.
+
+## Final constants (as of Module 4)
+
+Every pin and tunable lives in `include/config.h` as a named constant;
+nothing in `src/` hardcodes one directly. The table below is a snapshot —
+`config.h` is always the source of truth, and most of these are still
+**provisional defaults** pending the hardware-test checklist
+(`docs/hardware-test.md`), not confirmed values.
+
+| Constant | Default | Status |
+|----------|---------|--------|
+| `X_ENA`/`X_IN1`/`X_IN2`, `Y_ENB`/`Y_IN3`/`Y_IN4` | 25/26/27, 33/32/13 | provisional (motor driver pins) |
+| `X_MIN`/`X_MAX`/`Y_MIN`/`Y_MAX` | 34/35/36/39 | provisional (sensor pins — confirm with `scan`) |
+| `SENSOR_ACTIVE_LEVEL` | `HIGH` | provisional (confirm with `mon`/`pol`) |
+| `X_FORWARD_IS_TOWARD_MAX` / `Y_FORWARD_IS_TOWARD_MAX` | `true` / `true` | provisional (confirm with `xf`/`yf`) |
+| `MAX_DUTY` | 153 (derived: `255 * 6.0 / (12.0 - 2.0)`) | fixed by the 12V/6V/2V-drop formula, not a guess |
+| `DEFAULT_SPEED` | 110 | arbitrary safe starting jog duty |
+| `REVERSE_LOCKOUT_MS` | 400 | reasonable default, not hardware-tuned |
+| `REVERSE_PAUSE_MS` | 150 | reasonable default, not hardware-tuned |
+| `MAX_TRAVEL_MS` | 20000 | provisional — size from `st`'s `longestSegmentMs` (see `docs/hardware-test.md` step 8) |
+| `MAX_CLEAR_MS` | 3000 | provisional — size from `st`'s `longestClearMs` (see `docs/hardware-test.md` step 8) |
+| `RUN_SPEED_X`/`RUN_SPEED_Y` | `DEFAULT_SPEED` | adjustable at runtime via `sx`/`sy` |
+| `RUN_TELEMETRY` | `true` | observation-only; see README |
+| `AUTO_RUN_ON_BOOT` | `false` | only ever enable after full calibration, for standalone mode |
+| `AUTO_RUN_DELAY_MS` | 10000 | countdown before an enabled auto-run fires |
+
 ## Why MAX_DUTY exists
 
 The L298N is fed from the 12V barrel-jack supply, but the TT motors are
