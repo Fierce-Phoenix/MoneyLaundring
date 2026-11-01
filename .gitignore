@@ -7,6 +7,9 @@
 .vscode/launch.json
 .vscode/ipch/
 
+# Packaged firmware images stay local (build them with scripts/package_firmware.py)
+dist/
+
 # Build / completion reports stay local
 reports/
 

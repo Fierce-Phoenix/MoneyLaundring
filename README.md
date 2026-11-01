@@ -85,6 +85,41 @@ PATH, use the reproducible wrapper scripts instead:
 Both scripts report `19 of 19 succeeded` when the `Axis` test suite
 passes.
 
+### Building a flashable image
+
+`scripts/package_firmware.py` turns a clean `pio run -e esp32dev` build
+into a single flashable binary (bootloader + partition table +
+`boot_app0` + application merged at their real flash offsets), plus the
+four component images, a `SHA256SUMS` file, and a `MANIFEST.md`
+describing exactly what was built and from which commit.
+
+1. Build first: `pio run -e esp32dev` (the script reads its output from
+   `.pio/build/esp32dev`; it does not build anything itself).
+2. Run the script with PlatformIO's own Python interpreter (the one
+   `pio` itself resolves to - check with `pio system info` if unsure
+   which one that is on your machine):
+   ```
+   <platformio-python> scripts/package_firmware.py
+   ```
+3. The script refuses to run (writes nothing) if the git working tree
+   is dirty, or if `AUTO_RUN_ON_BOOT` in `include/config.h` is not
+   exactly `false` - packaging a build that could auto-run on boot is
+   not allowed.
+4. Output goes to `dist/` (gitignored, never committed): the merged
+   image (`moneylaundring-<shortsha>-merged.bin`), the four component
+   images, `SHA256SUMS`, and `MANIFEST.md`.
+5. To flash the merged image: `python -m esptool --chip esp32 --port
+   COMx --baud 460800 write_flash 0x0 moneylaundring-<shortsha>-merged.bin`
+   (replace `COMx` with the real port). The exact command is also
+   printed in `MANIFEST.md`.
+
+**The image is only as current as the commit it names.** `dist/` is
+never committed and is overwritten by every run of the script; if the
+source has moved on since a `dist/` image was built, rebuild before
+flashing. `MANIFEST.md` always states the exact source commit the image
+inside that same `dist/` folder was built from - trust that, not the
+filename alone, if in doubt.
+
 ## Command reference (@ 115200 baud, newline-terminated)
 
 | Command       | Effect |
