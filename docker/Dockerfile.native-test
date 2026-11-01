@@ -1,0 +1,24 @@
+# docker/Dockerfile.native-test - reproducible host for `pio test -e native`.
+#
+# Built once, reused for every subsequent native test run via
+# scripts/test-native.cmd / scripts/test-native.sh. Pinned to the exact
+# PlatformIO Core version this module's throwaway Docker environment
+# resolved to (confirmed with `pio --version` inside that container before
+# writing this file - see reports/module-4-report.md for the exact
+# transcript). Pinning means a fresh build of this image always gets the
+# same PlatformIO behaviour, not whatever `pip install platformio` happens
+# to resolve on the day someone rebuilds it.
+
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends g++ make \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir platformio==6.2.0
+
+WORKDIR /workspace
+
+# No ENTRYPOINT/CMD: the test scripts pass the exact `pio test -e native`
+# invocation (plus the PLATFORMIO_BUILD_DIR isolation and PLATFORMIO_CORE_DIR
+# volume) at `docker run` time.

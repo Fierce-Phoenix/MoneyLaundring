@@ -38,6 +38,28 @@ pio device monitor            # serial console @ 115200
 pio test -e native             # run the native Axis unit tests (no board needed)
 ```
 
+## Testing
+
+`pio test -e native` needs a host g++ toolchain. If you don't have one on
+PATH, use the reproducible wrapper scripts instead:
+
+- `scripts\test-native.cmd` (Windows) / `scripts/test-native.sh`
+  (Linux/macOS/Git Bash) each check for `g++` on PATH first (fast path, runs
+  `pio test -e native` directly); if it's missing, they build
+  `docker/Dockerfile.native-test` once (pinned to PlatformIO 6.2.0, tagged
+  `moneylaundring-native-test`) and run the tests inside a throwaway
+  container instead.
+- Inside that container, `PLATFORMIO_BUILD_DIR` is set to a path inside the
+  container (`/tmp/pio-native-build`), not under the mounted repo, so the
+  container's build never touches the host's `.pio\build` — confirmed by
+  checking directory timestamps before and after a container run.
+- `PLATFORMIO_CORE_DIR` (PlatformIO's platform/tool cache) is backed by a
+  named Docker volume (`moneylaundring-pio-core`), so the native platform is
+  downloaded once and reused by every later throwaway container instead of
+  being re-fetched every run.
+
+Both scripts report `19 of 19 succeeded` when the `Axis` test suite passes.
+
 ## Console commands (@ 115200, newline-terminated)
 
 | Command       | Effect                                                         |
