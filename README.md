@@ -109,9 +109,16 @@ passes.
 While running, two more lines print automatically whenever
 `RUN_TELEMETRY` (on by default) is enabled: `[run] <axis> reversed -> ...`
 on every reversal, and `[run] <axis> cleared the end in ... ms` once the
-carriage clears the sensor it just reversed off of. See
-[`docs/hardware-test.md`](docs/hardware-test.md) for how to use these
-lines to size `MAX_TRAVEL_MS`/`MAX_CLEAR_MS`.
+carriage clears the sensor it just reversed off of. `MAX_TRAVEL_MS`/
+`MAX_CLEAR_MS` are fixed constants while run speed is adjustable, so
+they must be measured (via `st`) at the **lowest duty you will ever
+actually run**, not a higher one - a lower duty means a longer travel
+time for the same distance, so a value sized against a higher duty will
+raise a false `TRAVEL_TIMEOUT`/`STUCK_AT_LIMIT` once run slower. The
+first segment after `run` starts mid-track and is short, so only read
+`st`'s longest values after at least four reversals per axis. See
+[`docs/hardware-test.md`](docs/hardware-test.md) steps 7 and 9 for the
+full procedure.
 
 ## Fault codes
 
@@ -124,7 +131,7 @@ likely cause:
 | `BOTH_LIMITS_ACTIVE` | both limit sensors on that axis read active at once | sensor polarity or placement is wrong for that axis - check wiring and `pol` |
 | `OPPOSITE_LIMIT_HIT` | the limit sensor *behind* the current heading went active (rising edge) | that axis's FORWARD mapping constant is flipped - flip `X_FORWARD_IS_TOWARD_MAX`/`Y_FORWARD_IS_TOWARD_MAX` in `config.h` |
 | `STUCK_AT_LIMIT` | the behind limit stayed active for `MAX_CLEAR_MS` while the axis was otherwise allowed to run - the carriage never left the end it started/reversed at | classically inverted motor wiring with the carriage already resting at that end: flip the FORWARD mapping constant; otherwise check for a mechanical jam or too low a run speed |
-| `TRAVEL_TIMEOUT` | no endpoint sensor was seen within `MAX_TRAVEL_MS` | check that axis's sensor wiring, or its run speed - `MAX_TRAVEL_MS` may need to be larger for a slower gantry |
+| `TRAVEL_TIMEOUT` | no endpoint sensor was seen within `MAX_TRAVEL_MS` | check that axis's sensor wiring; or the run speed is below the bench-tested minimum usable speed (see `docs/hardware-test.md` step 7); or `MAX_TRAVEL_MS` was sized against a higher duty than currently in use (re-measure per step 9) |
 
 A fault is sticky until the next `arm`+`run`; the firmware never
 auto-retries a fault on its own, including via `AUTO_RUN_ON_BOOT` (see

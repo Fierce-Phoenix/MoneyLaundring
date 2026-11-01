@@ -125,8 +125,8 @@ nothing in `src/` hardcodes one directly. The table below is a snapshot —
 | `DEFAULT_SPEED` | 110 | arbitrary safe starting jog duty |
 | `REVERSE_LOCKOUT_MS` | 400 | reasonable default, not hardware-tuned |
 | `REVERSE_PAUSE_MS` | 150 | reasonable default, not hardware-tuned |
-| `MAX_TRAVEL_MS` | 20000 | provisional — size from `st`'s `longestSegmentMs` (see `docs/hardware-test.md` step 8) |
-| `MAX_CLEAR_MS` | 3000 | provisional — size from `st`'s `longestClearMs` (see `docs/hardware-test.md` step 8) |
+| `MAX_TRAVEL_MS` | 20000 | provisional — measure from `st`'s `longestSegmentMs` at the lowest duty you will run, after at least 4 reversals per axis (see `docs/hardware-test.md` steps 7 and 9) |
+| `MAX_CLEAR_MS` | 3000 | provisional — measure from `st`'s `longestClearMs` at the lowest duty you will run, after at least 4 reversals per axis (see `docs/hardware-test.md` steps 7 and 9) |
 | `RUN_SPEED_X`/`RUN_SPEED_Y` | `DEFAULT_SPEED` | adjustable at runtime via `sx`/`sy` |
 | `RUN_TELEMETRY` | `true` | observation-only; see README |
 | `AUTO_RUN_ON_BOOT` | `false` | only ever enable after full calibration, for standalone mode |

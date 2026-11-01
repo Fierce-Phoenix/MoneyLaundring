@@ -95,9 +95,36 @@ which end "FORWARD" drives toward on each axis, and both default to
    `SENSOR_ACTIVE_LEVEL` in `config.h` so it survives a reboot, then
    reflash.
 
-## 7. First supervised low-speed run
+## 7. Find the minimum usable speed per axis
 
-1. Keep `speed`/`sx`/`sy` low (well under `MAX_DUTY`).
+`MAX_TRAVEL_MS`/`MAX_CLEAR_MS` are fixed constants, but run speed
+(`sx`/`sy`) is adjustable at runtime, and a lower duty means a longer
+travel time and a longer clear time for the same physical distance. A
+timeout sized against a *higher* duty's travel time will be too tight -
+and will raise a false `TRAVEL_TIMEOUT` - if the gantry is later run at a
+*lower* duty. So find the lowest duty you will ever actually run at
+*before* sizing the timeouts in step 9, not after.
+
+1. Type `speed 40` (or similarly low), then `xf`. Watch whether the
+   X-axis carriage actually starts moving and keeps moving smoothly
+   against the real rack-and-pinion friction, or stalls/judders.
+2. If it stalls or barely moves, raise `speed` a little and retry `xf`
+   until it starts and keeps moving reliably.
+3. Repeat with `yf` for the Y axis (speed may differ between axes due to
+   friction/gearing differences).
+4. Record the lowest duty each axis reliably starts and keeps moving at
+   as that axis's **minimum usable speed**. This is the duty you should
+   actually plan to run at (or above) - running below it risks a stall
+   that looks like a `TRAVEL_TIMEOUT` fault for the wrong reason.
+5. If you later decide to lower either axis's run speed below what you
+   tested here, re-check this step and re-measure step 9's timeouts
+   before doing so - both depend on the actual lowest duty in use.
+
+## 8. First supervised low-speed run
+
+1. Set `sx`/`sy` (and `speed` for jogs) to each axis's minimum usable
+   speed from step 7, or any higher value you intend to actually run at -
+   not an arbitrary "low" number disconnected from step 7's finding.
 2. Keep a hand on the 12V supply's power switch or plug the whole time.
 3. Type `run`. Watch both axes bounce. Watch for:
    - A fault line (`[fault] axis ... FAULT: ...`) - see the fault table
@@ -109,13 +136,34 @@ which end "FORWARD" drives toward on each axis, and both default to
      `st`).
 4. Type `halt` or `stop` immediately if anything looks wrong - both work
    at any time, with `stop` also disarming.
+5. Let it keep bouncing (don't `halt` yet) until each axis has reversed
+   **at least four times** - see step 9 for why.
 
-## 8. Turning run telemetry into real `MAX_TRAVEL_MS`/`MAX_CLEAR_MS`
+## 9. Turning run telemetry into real `MAX_TRAVEL_MS`/`MAX_CLEAR_MS`
 
-Let the gantry bounce for a few minutes (low speed, supervised), then
-type `st`. It prints `longestSegmentMs` and `longestClearMs` per axis -
-the longest a travel segment and a reversal-clear actually took, observed
-on the real hardware.
+Two things make this step easy to get wrong if rushed:
+
+- **Measure at the lowest duty you will actually run, not a higher
+  one.** `MAX_TRAVEL_MS`/`MAX_CLEAR_MS` are fixed constants while speed
+  is adjustable; a lower duty means a longer travel time and a longer
+  clear time for the same physical distance, so a value sized against a
+  higher duty's telemetry will be too tight (and will raise a false
+  `TRAVEL_TIMEOUT`/`STUCK_AT_LIMIT`) once run at a lower duty. Run at
+  each axis's minimum usable speed from step 7 while collecting the
+  numbers below, and re-measure this step if that minimum usable speed
+  ever changes later.
+- **Ignore the first segment after `run` starts.** The gantry starts
+  mid-track, not at an end, so the very first segment (before the first
+  reversal) is shorter than a normal end-to-end segment and will
+  under-report `longestSegmentMs` if read too early. Only read `st`
+  after **at least four reversals per axis** (step 8's last item keeps
+  it running that long) so the longest values reflect real end-to-end
+  segments and clears, not that short first one.
+
+Once both conditions are met, type `st`. It prints `longestSegmentMs`
+and `longestClearMs` per axis - the longest a travel segment and a
+reversal-clear actually took, observed on the real hardware at the
+speed actually tested.
 
 - Set `MAX_TRAVEL_MS` to roughly **2x** the longest `longestSegmentMs`
   observed across both axes - enough headroom that a normal segment never
@@ -127,22 +175,25 @@ on the real hardware.
   shrink to something a normal reversal could occasionally exceed by
   chance.
 - Edit both constants in `include/config.h` and reflash.
+- If you later run at a lower speed than step 7's minimum usable speed
+  (not recommended - see step 7), repeat this step at that lower speed
+  before trusting these timeouts again.
 
-## 9. Fault table
+## 10. Fault table
 
 | Fault | Likely cause | Fix |
 |-------|-------------|-----|
 | `BOTH_LIMITS_ACTIVE` | both limit sensors on that axis read active at once | sensor polarity or placement wrong for that axis - recheck wiring and `pol` |
 | `OPPOSITE_LIMIT_HIT` | the sensor behind the current heading went active (rising edge) | that axis's FORWARD mapping constant is flipped - redo step 5 |
-| `STUCK_AT_LIMIT` | the behind limit stayed active for `MAX_CLEAR_MS` while the axis was otherwise allowed to run | classically inverted motor wiring with the carriage already resting at that end - redo step 5; otherwise check for a mechanical jam or too low a run speed |
-| `TRAVEL_TIMEOUT` | no endpoint sensor was seen within `MAX_TRAVEL_MS` | check that axis's sensor wiring, or raise the run speed / `MAX_TRAVEL_MS` |
+| `STUCK_AT_LIMIT` | the behind limit stayed active for `MAX_CLEAR_MS` while the axis was otherwise allowed to run | classically inverted motor wiring with the carriage already resting at that end - redo step 5; otherwise check for a mechanical jam or too low a run speed (redo step 7) |
+| `TRAVEL_TIMEOUT` | no endpoint sensor was seen within `MAX_TRAVEL_MS` | check that axis's sensor wiring; or the run speed is below step 7's minimum usable speed; or `MAX_TRAVEL_MS` was sized against a higher duty than currently in use (redo step 9) |
 
 A fault always disarms and never auto-retries. Fix the underlying cause,
 then `arm` and `run` again manually.
 
-## 10. Standalone mode (no USB, no bench supervision)
+## 11. Standalone mode (no USB, no bench supervision)
 
-Once calibration (steps 3, 5, 6) and sizing (step 8) are done and the
+Once calibration (steps 3, 5, 6) and sizing (steps 7, 9) are done and the
 gantry has run cleanly multiple times under supervision:
 
 1. Power off everything. Disconnect USB.
@@ -175,3 +226,29 @@ gantry has run cleanly multiple times under supervision:
    the bench as the evidence of what reset actually happened.
 6. Power on from 12V only and confirm the gantry behaves as expected
    before leaving it unattended.
+
+## 12. What to send back
+
+If you're running this checklist for someone else (e.g. reporting back
+to whoever wrote the firmware) and can't share the live hardware, copy
+the following straight out of the serial monitor and send it as plain
+text - this is exactly what's needed to confirm calibration without
+being on the bench:
+
+- The full boot banner, **including the `[boot] reset reason: ...`
+  line**, captured twice: once right after pressing the physical RST
+  button, and once right after unplugging and replugging the USB cable.
+  (Both are expected to print the same reset-reason name on the classic
+  ESP32 - see the README's Safety rules for why.)
+- The full output of `map`.
+- The full output of `scan`, run once with each of the four sensors
+  covered in turn during the window (so all four GPIO-change lines
+  appear).
+- The output of `pol`.
+- Which sensor's `*` marker activates for `xf` and which activates for
+  `yf` (i.e. the raw observation step 5 is based on, not just the
+  resulting `X_FORWARD_IS_TOWARD_MAX`/`Y_FORWARD_IS_TOWARD_MAX` values).
+- The output of `st`, taken after each axis has reversed at least four
+  times during a `run` (per step 9), together with every `[run] ...`
+  line printed during that same run (both the `reversed` and `cleared
+  the end` lines, for both axes).

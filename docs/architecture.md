@@ -273,7 +273,12 @@ should be written only after reading the previous module's report.
   knob, button, or other input device; `sx`/`sy`/`speed` are the only way
   to change it, and only while a serial connection is available (or, once
   set at compile time via `RUN_SPEED_X`/`RUN_SPEED_Y`, not adjustable at
-  all in standalone mode without a serial cable).
+  all in standalone mode without a serial cable). This matters for
+  `MAX_TRAVEL_MS`/`MAX_CLEAR_MS` too: those are fixed constants while
+  speed is adjustable, so they must be measured at the lowest duty ever
+  actually run (a lower duty means a longer travel/clear time for the
+  same distance) and re-measured if that lowest duty later changes — see
+  `docs/hardware-test.md` steps 7 and 9.
 - **Hardware calibration is an operator step, not a module.** The pin
   map, sensor polarity, and `X_FORWARD_IS_TOWARD_MAX`/
   `Y_FORWARD_IS_TOWARD_MAX` cannot be determined from a dev machine
